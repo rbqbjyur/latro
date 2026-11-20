@@ -34,12 +34,9 @@ it open, says exactly what it couldn't, and moves on. For a comprehensive
 collection, including locked files and raw NTFS artefacts, use a full
 collector such as KAPE or the Velociraptor Offline Collector.
 
-![Live Response console: connect, run collector.ps1 and Live Response's transcript line, then the collector's banner (its version, the host and the UTC start time, the OS and the drives searched) and its 31 progress lines, one per artefact](docs/images/live-response-run.webp)
+![Live Response console: connect, run collector.ps1 and Live Response's transcript line, then latro 2.3.0, its header fields (the UTC start time, the host, the OS, the run log's path and the drives searched), the Warnings section reading none, and the first 11 of its 47 progress lines, one per artefact](docs/images/live-response-run.webp)
 
-A run of 2.2.0 in a Live Response session (Windows 11 Enterprise 24H2, as
-SYSTEM). Since 2.3.0 the console opens with `latro <version>` and
-`Label : value` fields, and prints the Warnings section (`none` when empty)
-before its 47 progress lines.
+A run in a Live Response session (Windows 11 Enterprise 24H2, as SYSTEM).
 
 ## Table of contents
 
@@ -77,8 +74,8 @@ before its 47 progress lines.
 - **Legacy forms included.** Older-Windows forms of each artefact (e.g. `.evt`,
   `RecentFileCache.bcf`, XP profile paths) and the previous install kept in
   `Windows.old` are collected as part of the same artefact.
-- **Every local drive** for per-drive artefacts (Recycle Bin; on NTFS,
-  `$MFT` and the shadow copy catalogue for `getfile`): fixed or removable,
+- **Every local drive** for per-drive artefacts (Recycle Bin; on NTFS, the
+  shadow copy catalogue, and `$MFT` for `getfile`): fixed or removable,
   NTFS, FAT or exFAT.
 - **SHA-256 of the zip** (or of each volume), printed under its `getfile`
   lines in `sha256sum` format, so the download can be checked.
@@ -263,18 +260,19 @@ ready-to-paste `getfile` command at the end.
 | Artefact | Why | What it would take | Alternative |
 |---|---|---|---|
 | `$MFT` (each NTFS drive) | NTFS metafile | NTFS parser | `getfile` (printed) |
-| `$MFTMirr` (each NTFS drive) | NTFS metafile | NTFS parser | Not printed: `$MFT`'s `getfile` is |
+| `$MFTMirr` (each NTFS drive) | NTFS metafile | NTFS parser | `getfile` manually (not printed) |
 | `$LogFile` (each NTFS drive) | NTFS metafile | NTFS parser | Not possible via `getfile` (reported as an empty file); Velociraptor Offline Collector |
 | `$UsnJrnl:$J` (each NTFS drive) | NTFS metafile (alternate data stream) | NTFS parser | Not possible via `getfile`; Velociraptor Offline Collector |
 | File-system metadata of FAT and exFAT drives (allocation table, directory entries) | Not stored as files | FAT/exFAT parser | Not possible via `getfile`; a raw-disk collector |
 | System hives (`SAM`, `SECURITY`, `SOFTWARE`, `SYSTEM`) and their transaction logs | Held exclusively by the kernel while loaded | NTFS parser | `getfile` for the hives (printed) |
-| Shadow copy catalogue (`System Volume Information\{3808876b-c176-4e48-b7ae-04046e6cc752}`, each NTFS drive) | Access denied, even to SYSTEM | NTFS parser | `getfile` (printed) |
+| Shadow copy catalogue (`System Volume Information\{3808876b-c176-4e48-b7ae-04046e6cc752}`, each NTFS drive) | Access denied, even to SYSTEM | NTFS parser | Not possible via `getfile` (reported as an empty file) |
 | SRUM (`SRUDB.dat` and its ESE files) | Sometimes held open by the system (collected when it isn't) | NTFS parser | `getfile` (printed) |
 | BITS (`qmgr.db` and its ESE files) | Held by the BITS service while it runs: a demand-start service that stops itself when idle (collected when stopped) | NTFS parser | `getfile` (printed) |
 | Service account hives (`DEFAULT`, LocalService and NetworkService `NTUSER.DAT`) and their transaction logs | Loaded while Windows runs | NTFS parser | `getfile` manually (not printed) |
 | User Access Logging `Current.mdb` (servers) | Usually held open by the UAL service | NTFS parser | `getfile` (printed) |
 | User hives of logged-on users (`NTUSER.DAT`, `UsrClass.dat`) and their transaction logs | Held exclusively while the user is logged on | NTFS parser | `getfile` for the hives (printed) |
 | `WebCacheV01.dat` of logged-on users | Usually held open in the user's session | NTFS parser | `getfile` manually (not printed) |
+| A running browser's current session files (Browser Sessions, e.g. Edge's `Sessions\Session_*` and `Tabs_*`) | Held by the running browser | NTFS parser | `getfile` manually (not printed) |
 | Internet Explorer's cookie `index.dat` (Browser Cookies) | Locked from boot | NTFS parser | `getfile` manually (not printed) |
 
 Hives of users who are not logged on, and most other in-use files (EVTX, a
@@ -371,10 +369,9 @@ files, and reads only drives with a letter.
 
 ## Reading the summary
 
-![Live Response console: the end of the run - the Warnings section with one unusual gap (BITS, 7 collected and 3 not accessible), the artefact summary with a status and, where a gap is normal for the host, its reason for each of the 31 artefacts, the number of files collected, the getfile command for the zip, its SHA-256 and the getfile command for the run log](docs/images/live-response-summary.webp)
+![Live Response console: the end of the run - the last two lines of the artefact summary (WER and Windows Timeline), the number of files collected with the zip's size in MiB, the getfile command for the zip, its SHA-256 and the getfile command for the run log](docs/images/live-response-summary.webp)
 
-The end of the same 2.2.0 run. Since 2.3.0 there are 47 summary lines and
-the size reads "MiB compressed".
+The end of the same run.
 
 At the end come the Warnings again, the artefact summary and the lists under
 it (folders not listed, copies whose size differs), the total
@@ -490,7 +487,7 @@ welcome.
   load .NET's `System.IO.Compression` assemblies; PSScriptAnalyzer-clean;
   times in UTC; British spelling in output and documentation. Full-word
   names; a function returns its outcome rather than setting shared state.
-  Every failure is isolated to its own location and reported, never silent.
+  Every failure is isolated to its own location and reported.
 - Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Licence

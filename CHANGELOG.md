@@ -13,7 +13,8 @@ Notable changes to `collector.ps1`. The format follows
 - Browser Bookmarks, Browser Cookies, Browser Preferences and Browser
   Extensions (Firefox's `extensions.json`), counted per browser profile, and
   Browser Sessions, counted per file. A lock on Browser Cookies (Internet
-  Explorer's cookie `index.dat` is locked from boot) gets "(requires NTFS
+  Explorer's cookie `index.dat` is locked from boot) or on Browser Sessions
+  (a running browser's current session files) gets "(requires NTFS
   parser)".
 - Server logs, found only where the role or product is installed (elsewhere
   they read *Missing*, with no note): DHCP Server Logs (the audit log), DNS
@@ -26,7 +27,8 @@ Notable changes to `collector.ps1`. The format follows
 - MSRT Log: `Windows\debug\mrt.log`.
 - Shadow Copy Catalog: the shadow copy catalogue at each NTFS drive's root,
   not the shadow copies' stores. Even SYSTEM is denied it, so it reads
-  *Not accessible (requires NTFS parser)*, with a `getfile` line.
+  *Not accessible (requires NTFS parser)*; it gets no `getfile` line
+  (Live Response's `getfile` reports it as empty).
 - Thumbcache: Explorer's `thumbcache_idx.db`, not the cached thumbnails.
 - Registry Hives (system): the `COMPONENTS` and `ELAM` hives and AppLocker's
   `AppCache.dat`.

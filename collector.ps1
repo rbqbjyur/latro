@@ -88,7 +88,8 @@ $outputFolders = @(
     Join-Path $systemDrive 'ProgramData\Microsoft\Windows Defender Advanced Threat Protection\Temp\Collections'
     # The SYSTEM-only temp folder of newer Windows builds (SYSTEM and Administrators).
     Join-Path $systemDrive 'Windows\SystemTemp\LiveResponseCollector'
-    # The running account's temp folder (C:\Windows\Temp for SYSTEM).
+    # The running account's temp folder (for SYSTEM: C:\Windows\SystemTemp on
+    # builds where GetTempPath returns it, else C:\Windows\Temp).
     Join-Path ([System.IO.Path]::GetTempPath()) 'LiveResponseCollector'
 )
 $zipName = "${hostName}_${timestamp}.zip"
@@ -156,10 +157,8 @@ $gapReasons = @{
 #   Literal  Use the path as-is, without listing it. For NTFS metafiles, which
 #            PowerShell can neither see nor open: they stay as 'Not accessible'
 #            placeholders so future raw/sensor-based collection slots in cleanly.
-#   GetFile  The Defender sensor's getfile may fetch it, so the command is printed
-#            at the end if the read failed, without testing that the file exists
-#            (PowerShell can neither see the NTFS metafiles nor test a file it
-#            is denied, such as the shadow copy catalogue).
+#   GetFile  Literal rows only: the Defender sensor's getfile can fetch it, so the
+#            command is printed at the end if the read failed.
 #   FollowUp Which of the row's locked files get a printed getfile command:
 #            'System' (machine-wide paths; the default) or 'User' (user-profile
 #            paths).
@@ -336,7 +335,7 @@ $artefacts = @(
     ) }
     # The shadow copy catalogue at each NTFS volume's root: one entry per shadow
     # copy, with its creation time. Not the shadow copies' stores (content).
-    @{ Name = 'Shadow Copy Catalog'; Group = 2; Drives = 'NTFS'; ExpectLocked = { <# access denied even to SYSTEM #> $true }; ExpectedOpenError = 'AccessDenied'; GetFile = $true; System = 'System Volume Information\{3808876b-c176-4e48-b7ae-04046e6cc752}' }
+    @{ Name = 'Shadow Copy Catalog'; Group = 2; Drives = 'NTFS'; ExpectLocked = { <# access denied even to SYSTEM #> $true }; ExpectedOpenError = 'AccessDenied'; System = 'System Volume Information\{3808876b-c176-4e48-b7ae-04046e6cc752}' }   # no getfile route (reported as empty)
     # SQL Server's error logs, per instance; only where SQL Server is installed.
     @{ Name = 'SQL Server Logs'; Group = 2; System = @(
         'Program Files\Microsoft SQL Server\*\MSSQL\LOG\ERRORLOG*'
@@ -555,7 +554,7 @@ $artefacts = @(
     # Default profile only, as the store holds it), Firefox's session store and
     # its backups, IE's recovery and tab roaming folders; XP profile paths last.
     # Counted per file: a profile's sessions are several files.
-    @{ Name = 'Browser Sessions'; Group = 3
+    @{ Name = 'Browser Sessions'; Group = 3; ExpectLocked = { <# a running browser's current session files #> $true }
        User = @(
            'AppData\Local\Microsoft\Edge\User Data\*\Sessions\*'                        # Edge
            'AppData\Local\Microsoft\Edge Beta\User Data\*\Sessions\*'                   # Edge Beta
@@ -2258,9 +2257,8 @@ function Write-RetrievalCommand {
 # the Defender sensor may retrieve directly (locked files usually; not files
 # whose content isn't on the disk, which aren't listed) - outcome-based: only reads that
 # actually failed, in collection order (so metafiles first). Metafiles are
-# listed only if flagged GetFile; a GetFile row's files are listed with no
-# Test-Path (PowerShell can't reliably see or test them); other files must
-# still exist. Kept lean: each row's FollowUp scope
+# listed only if flagged GetFile, with no Test-Path (PowerShell can't reliably
+# see them); other files must still exist. Kept lean: each row's FollowUp scope
 # only (machine-wide by default; for user hives, the users' own, not the
 # built-in service accounts'), and no registry transaction logs (inferred from
 # the hive). Other locked files, ESE logs included, are listed.
@@ -2268,11 +2266,10 @@ function Write-FollowUpCommand {
     param($UnreadableFiles)
     $followUpPaths = New-Object 'System.Collections.Generic.List[string]'
     foreach ($file in $UnreadableFiles) {
-        if ($file.GetFile) {
-            $followUpPaths.Add($file.Path)
+        if ($file.Literal) {
+            if ($file.GetFile) { $followUpPaths.Add($file.Path) }
             continue
         }
-        if ($file.Literal)                  { continue }
         if ($file.Scope -ne $file.FollowUp) { continue }
         if ($file.IsTransactionLog)         { continue }
         if (Test-Path -LiteralPath $file.Path -ErrorAction SilentlyContinue) { $followUpPaths.Add($file.Path) }
