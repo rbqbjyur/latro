@@ -1,6 +1,7 @@
-# defender-live-response-collector
+# latro
 
-A single, self-contained PowerShell script for forensic triage collection
+latro, the Live Response collector: a single, self-contained PowerShell
+script, `collector.ps1`, for forensic triage collection
 (incident response / DFIR) through **Microsoft Defender for Endpoint (MDE)
 Live Response**. Upload it to the Live Response library, run it on a Windows
 device, and pull back one zip of timeline-relevant forensic artefacts
@@ -35,7 +36,10 @@ collector such as KAPE or the Velociraptor Offline Collector.
 
 ![Live Response console: connect, run collector.ps1 and Live Response's transcript line, then the collector's banner (its version, the host and the UTC start time, the OS and the drives searched) and its 31 progress lines, one per artefact](docs/images/live-response-run.webp)
 
-A run in a Live Response session (Windows 11 Enterprise 24H2, as SYSTEM).
+A run of 2.2.0 in a Live Response session (Windows 11 Enterprise 24H2, as
+SYSTEM). Since 2.3.0 the console opens with `latro <version>` and
+`Label : value` fields, and prints the Warnings section (`none` when empty)
+before its 47 progress lines.
 
 ## Table of contents
 
@@ -53,23 +57,29 @@ A run in a Live Response session (Windows 11 Enterprise 24H2, as SYSTEM).
 
 ## What it does
 
-- **Collects 28 timeline-relevant artefacts** in one run, and lists `$MFT`
-  for `getfile` (31 summary lines with the other two NTFS metafiles): event
-  logs, Prefetch, Amcache and PCA, registry hives, SRUM, BITS, scheduled tasks,
-  LNK files and JumpLists, browser history for every maintained browser,
-  Recycle Bin `$I` records, PowerShell history and transcripts, Defender,
-  OneDrive, Teams and Configuration Manager logs, and more
+- **Collects 43 timeline-relevant artefacts** in one run, and lists `$MFT`
+  for `getfile` (47 summary lines with the other three NTFS metafiles): event
+  logs and event trace logs, Prefetch, Amcache and PCA,
+  registry hives, SRUM, BITS, scheduled tasks, LNK files and JumpLists, the
+  thumbnail cache index, the shadow copy catalogue, browser history for every
+  maintained browser and, for most of them, bookmarks, cookies, sessions and
+  preferences, Recycle Bin `$I` records, PowerShell history and transcripts,
+  Defender, OneDrive, Teams, Configuration Manager and MSRT logs, the DHCP,
+  DNS, IIS, SQL Server and Exchange Server logs on hosts that run them, and
+  more
   ([What it collects](#what-it-collects)).
 - **Timeline value first.** Artefacts are chosen for timestamped evidence of
   execution, file access, persistence, device use, browsing and command-line
-  activity. Windows-native sources only, plus browser history; metadata over
-  content (`$I` records, not the deleted `$R` files; `.wer` reports, not memory
-  dumps; browser history, not caches).
+  activity. Microsoft's and browsers' sources only; metadata over content
+  (`$I` records, not the deleted `$R` files; `.wer` reports, not memory
+  dumps; the thumbnail cache index, not the thumbnails; browser history, not
+  caches).
 - **Legacy forms included.** Older-Windows forms of each artefact (e.g. `.evt`,
   `RecentFileCache.bcf`, XP profile paths) and the previous install kept in
   `Windows.old` are collected as part of the same artefact.
-- **Every local drive** for per-drive artefacts (Recycle Bin, and `$MFT` for
-  `getfile`): fixed or removable, NTFS, FAT or exFAT.
+- **Every local drive** for per-drive artefacts (Recycle Bin; on NTFS,
+  `$MFT` and the shadow copy catalogue for `getfile`): fixed or removable,
+  NTFS, FAT or exFAT.
 - **SHA-256 of the zip** (or of each volume), printed under its `getfile`
   lines in `sha256sum` format, so the download can be checked.
 - **A per-file record**, `collection.csv` at the zip's root: one row per file
@@ -84,8 +94,8 @@ A run in a Live Response session (Windows 11 Enterprise 24H2, as SYSTEM).
 - **A run log** beside the zip, with everything the console showed.
 - **Split volumes** for a zip over 1 GiB, so each `getfile` stays well within
   Live Response's limits.
-- **Nothing but Windows PowerShell 5.1:** no modules, no downloads, no child
-  processes.
+- **Nothing but Windows PowerShell 5.1** and its in-box modules: nothing
+  downloaded or installed, no child processes.
 
 ## Install
 
@@ -95,7 +105,7 @@ A run in a Live Response session (Windows 11 Enterprise 24H2, as SYSTEM).
 Get-FileHash .\collector.ps1 -Algorithm SHA256
 ```
 
-Latest release: https://github.com/rbqbjyur/defender-live-response-collector/releases/latest
+Latest release: https://github.com/rbqbjyur/latro/releases/latest
 
 Upload `collector.ps1` to the Live Response library in the Defender portal.
 The script is unsigned: either enable *Allow unsigned script execution* in the
@@ -150,12 +160,20 @@ getfile "C:\ProgramData\Microsoft\Windows Defender Advanced Threat Protection\Te
   every one of its volumes. A run that stopped to keep the free-space reserve
   prints none (see [How it works](#how-it-works)).
 
+The console and the run log open with `latro <version>`, a blank line and the
+header fields as `Label : value`: `Started` (UTC), `Host`, `OS`, `Log` (the
+run log's path) and `Drives` (the drives searched). `OS` reads `not
+determined` (with the build, where it is known) when the OS name can't be
+read, with a warning; `Log` is left out when there is no run log. Next come the Warnings
+known by then (`none` when there are none) and one progress line per artefact,
+`[01/47] Collecting $LogFile` to `[47/47] Collecting Windows Timeline`. The
+end of the run is under [Reading the summary](#reading-the-summary).
+
 ## What it collects
 
-These are the locations it attempts, in the order the script runs them (the
-NTFS metafiles that open the summary are covered under
-[What it can't collect](#what-it-cant-collect)). Anything locked is skipped
-and counted.
+These are the locations it attempts, in the order the script runs them.
+Anything locked is skipped and counted. The NTFS metafiles that open the
+summary are covered under [What it can't collect](#what-it-cant-collect).
 
 - `%UserProfile%` stands for every folder under `%SystemDrive%\Users` (and,
   on XP-era layouts, `%SystemDrive%\Documents and Settings`), not only the
@@ -179,44 +197,59 @@ and counted.
   the script keeps every location relative to a drive root, one form for the
   system drive and for the per-drive artefacts alike, so a Windows folder
   installed under another name is not searched.
-- Per-drive artefacts (Recycle Bin, and the NTFS metafiles under
-  [What it can't collect](#what-it-cant-collect)) are taken from every local
-  drive, fixed or removable (NTFS, FAT or exFAT), e.g. `C:`, `D:` and a USB
-  drive; network drives are not.
+- Per-drive artefacts (Recycle Bin; on NTFS, the shadow copy catalogue and
+  the NTFS metafiles) are taken from every local drive, fixed or removable
+  (NTFS, FAT or exFAT), e.g. `C:`, `D:` and a USB drive; network drives are
+  not.
 - Inside the zip, files keep their original path
   (e.g. `C/Windows/Prefetch/...`), including names that end with a dot or a
   space; `collection.csv` sits at the root beside the drive folders.
 
 | Artefact | Location |
 |---|---|
-| Application Compatibility | `%SystemRoot%\AppCompat\Programs\Amcache.hve`<br>`%SystemRoot%\appcompat\pca\*` (Windows 11 22H2+)<br>`%SystemRoot%\AppCompat\Programs\RecentFileCache.bcf` (Windows 7)<br>`%SystemDrive%\System Volume Information\Syscache.hve` (Windows 7 / Server 2008 R2)<br>`%SystemDrive%\Windows.old\Windows\AppCompat\Programs\{Amcache.hve,RecentFileCache.bcf}`<br>hives with their `.LOG1`/`.LOG2` |
+| Application Compatibility | `%SystemRoot%\AppCompat\Programs\Amcache.hve`<br>`%SystemRoot%\appcompat\pca\*` (Windows 11 22H2+)<br>`%SystemRoot%\AppCompat\Programs\RecentFileCache.bcf` (Windows 7)<br>`%SystemDrive%\System Volume Information\Syscache.hve` (Windows 7 / Server 2008 R2)<br>`%SystemDrive%\Windows.old\Windows\AppCompat\Programs\{Amcache.hve,RecentFileCache.bcf}`<br>hives with their `.LOG`/`.LOG1`/`.LOG2` |
 | BITS | `%ProgramData%\Microsoft\Network\Downloader\` (recursive) |
 | Defender Logs | `%ProgramData%\Microsoft\Windows Defender\Support\` (recursive)<br>`%ProgramData%\Microsoft\Windows Defender\Scans\History\Service\DetectionHistory\` (recursive)<br>`%ProgramData%\Microsoft\Windows Defender\Scans\History\Service\Detections.log`<br>`%SystemRoot%\Temp\MpCmdRun.log`<br>`%ProgramData%\Microsoft\Microsoft AntiMalware\Support\` (recursive; older Defender / SCEP)<br>`%SystemDrive%\Windows.old\Windows\Temp\MpCmdRun.log` |
+| DHCP Server Logs | `%SystemRoot%\System32\dhcp\DhcpSrvLog-*.log` (DHCP Server role, with its audit logging on) |
+| DNS Server Logs | `%SystemRoot%\System32\dns\` (recursive, every file; the debug log among them once enabled)<br>`%SystemRoot%\System32\winevt\Logs\Microsoft-Windows-DNSServer%4Analytical.etl`<br>both with the DNS Server role |
 | Event Logs | `%SystemRoot%\System32\winevt\logs\*.evtx`<br>`%SystemRoot%\System32\config\*.evt` (XP)<br>`%SystemDrive%\Windows.old\Windows\System32\winevt\logs\*.evtx` |
+| Event Trace Logs | `%SystemRoot%\System32\LogFiles\WMI\` (recursive, every file; the `.etl` trace logs, `RtBackup` among them) |
+| Exchange Server Logs | `%SystemDrive%\Program Files\Microsoft\Exchange Server\*\TransportRoles\Logs\` (recursive, `*.log`; transport logs) |
 | Firewall Log | `%SystemRoot%\System32\LogFiles\Firewall\pfirewall.*`<br>`%SystemDrive%\Windows.old\Windows\System32\LogFiles\Firewall\pfirewall.*` |
 | Group Policy | `%SystemRoot%\System32\GroupPolicy\` (recursive)<br>`%ProgramData%\Microsoft\Group Policy\History\` (recursive; cached domain GPOs)<br>`%UserProfile%\AppData\Local\Microsoft\Group Policy\History\` (recursive)<br>`%SystemDrive%\Windows.old\Windows\System32\GroupPolicy\` `*.ini`, `*.pol` and `*\Scripts\` (recursive) |
+| IIS Logs | `%SystemDrive%\inetpub\logs\LogFiles\*.log` and its site folders (recursive, `*.log`)<br>`%SystemRoot%\System32\LogFiles\HTTPERR\*.log` (HTTP.sys)<br>`%SystemRoot%\System32\LogFiles\W3SVC*\*.log`<br>`%SystemDrive%\Windows.old\Windows\System32\LogFiles\W3SVC*\*.log` |
+| MSRT Log | `%SystemRoot%\debug\mrt.log` |
 | Prefetch | `%SystemRoot%\Prefetch\*.pf`<br>`%SystemDrive%\Windows.old\Windows\Prefetch\*.pf` |
-| Registry Hives (system) | `%SystemRoot%\System32\config\{SAM,SECURITY,SOFTWARE,SYSTEM}`<br>`%SystemRoot%\System32\config\RegBack\{SAM,SECURITY,SOFTWARE,SYSTEM,SYSTEM1}`<br>`%SystemDrive%\System Volume Information\_restore*\RP*\snapshot\_REGISTRY_*` (XP restore points)<br>`%SystemDrive%\Windows.old\Windows\System32\config\` and `...\config\RegBack\`, same hives<br>each with its `.LOG1`/`.LOG2` |
+| Registry Hives (system) | `%SystemRoot%\System32\config\{SAM,SECURITY,SOFTWARE,SYSTEM,COMPONENTS,ELAM}`<br>`%SystemRoot%\System32\AppLocker\AppCache.dat`<br>`%SystemRoot%\System32\config\RegBack\{SAM,SECURITY,SOFTWARE,SYSTEM,SYSTEM1}`<br>`%SystemDrive%\System Volume Information\_restore*\RP*\snapshot\_REGISTRY_*` (XP restore points)<br>`%SystemDrive%\Windows.old\Windows\System32\config\{SAM,SECURITY,SOFTWARE,SYSTEM}` and `...\config\RegBack\`, the same RegBack hives<br>each with its `.LOG`/`.LOG1`/`.LOG2` |
 | Restore Point Logs | `%SystemDrive%\System Volume Information\_restore*\RP*\rp.log` (XP) |
 | SCCM Client Logs | `%SystemRoot%\CCM\Logs\*` |
-| Scheduled Tasks | `%SystemRoot%\{System32,SysWOW64}\Tasks\` (recursive)<br>`%UserProfile%\AppData\Local\Microsoft\Windows\PowerShell\ScheduledJobs\` (recursive)<br>`%SystemRoot%\{System32,SysWOW64}\config\systemprofile\AppData\Local\Microsoft\Windows\PowerShell\ScheduledJobs\` (recursive)<br>`%SystemRoot%\Tasks\*.job`, `%SystemRoot%\SchedLgU.txt` (legacy)<br>`%SystemDrive%\Windows.old\Windows\System32\Tasks\` (recursive), `%SystemDrive%\Windows.old\Windows\Tasks\*.job`, `%SystemDrive%\Windows.old\Windows\SchedLgU.txt` |
+| Scheduled Tasks | `%SystemRoot%\{System32,SysWOW64}\Tasks\` (recursive)<br>`%UserProfile%\AppData\Local\Microsoft\Windows\PowerShell\ScheduledJobs\` (recursive)<br>`%SystemRoot%\{System32,SysWOW64}\config\systemprofile\AppData\Local\Microsoft\Windows\PowerShell\ScheduledJobs\` (recursive)<br>`%SystemRoot%\Tasks\*.job`, `%SystemRoot%\Tasks\SchedLgU.txt`, `%SystemRoot%\SchedLgU.txt` (legacy)<br>`%SystemDrive%\Windows.old\Windows\System32\Tasks\` (recursive), `%SystemDrive%\Windows.old\Windows\Tasks\*.job`, `%SystemDrive%\Windows.old\Windows\SchedLgU.txt` |
 | SetupAPI | `%SystemRoot%\INF\setupapi*.log`<br>`%SystemRoot%\setupapi.log` (XP)<br>`%SystemDrive%\Windows.old\Windows\INF\setupapi*.log` |
+| Shadow Copy Catalog | `<drive>\System Volume Information\{3808876b-c176-4e48-b7ae-04046e6cc752}` on every local NTFS drive (the catalogue, not the shadow copies' stores) |
+| SQL Server Logs | `%SystemDrive%\{Program Files,Program Files (x86)}\Microsoft SQL Server\*\MSSQL\LOG\ERRORLOG*` |
 | SRUM | `%SystemRoot%\System32\SRU\` (recursive: `SRUDB.dat` and its ESE logs)<br>`%SystemDrive%\Windows.old\Windows\System32\SRU\` (recursive) |
 | User Access Logging (SUM) | `%SystemRoot%\System32\LogFiles\Sum\` (recursive; Windows Server) |
-| Browser History | `%UserProfile%\AppData\Local\Microsoft\Edge{, Beta, Dev, SxS}\User Data\<profile>\History*`<br>`%UserProfile%\AppData\Local\Google\Chrome{, Beta, Dev, SxS}\User Data\<profile>\History*`<br>`%UserProfile%\AppData\Local\Chromium\User Data\<profile>\History*`<br>`%SystemRoot%\System32\config\systemprofile\AppData\Local\` paths for Chrome (all channels) and Chromium<br>`%UserProfile%\AppData\Local\Microsoft\Windows\WebCache\*` (IE 10/11, legacy Edge)<br>`index.dat` under `%UserProfile%\AppData\Local\Microsoft\Windows\{History,IEDownloadHistory}\` (recursive; IE 9 and earlier)<br>XP: `%UserProfile%\Local Settings\Application Data\` paths for Chrome (all channels) and Chromium; `index.dat` under `%UserProfile%\Local Settings\History\History.IE5\` (recursive)<br>The equivalent paths for Brave, Vivaldi, Opera, Yandex, Coc Coc, QQ Browser, 360 Secure Browser, Arc, Wave, Supermium, Prisma Access Browser, Firefox and Safari for Windows, with their legacy and XP forms: the Browser History row of `$artefacts` in [collector.ps1](collector.ps1) |
+| Browser Bookmarks | `%UserProfile%\AppData\Local\Microsoft\Edge{, Beta, Dev, SxS}\User Data\<profile>\Bookmarks*`<br>`%UserProfile%\AppData\Local\Google\Chrome{, Beta, Dev, SxS}\User Data\<profile>\Bookmarks*`<br>`Spartan.edb` under `%UserProfile%\AppData\Local\Packages\Microsoft.MicrosoftEdge_*\` (legacy Edge)<br>The equivalent paths for Chromium, Brave, Vivaldi, Yandex, Arc, Coc Coc, QQ Browser, UC Browser, Wave, Prisma Access Browser and Supermium, with their XP forms: the Browser Bookmarks row of `$artefacts` in [collector.ps1](collector.ps1) |
+| Browser Cookies | `%UserProfile%\AppData\Local\Google\Chrome{, Beta, Dev, SxS}\User Data\<profile>\Cookies*`<br>`%UserProfile%\AppData\Roaming\Mozilla\Firefox\Profiles\*\cookies.sqlite*`<br>`%UserProfile%\AppData\Roaming\Microsoft\Windows\Cookies\` (recursive; IE)<br>The equivalent paths for Chromium, Brave, Vivaldi, Yandex, Coc Coc, QQ Browser, UC Browser, 360 Secure Browser, Wave, Prisma Access Browser and Supermium, with their XP forms: the Browser Cookies row of `$artefacts` in [collector.ps1](collector.ps1)<br>Not collected: Edge's, Arc's and Opera's cookies, and `<profile>\Network\Cookies*` |
+| Browser Extensions | `%UserProfile%\AppData\Roaming\Mozilla\Firefox\Profiles\*\extensions.json` (Firefox) |
+| Browser History | `%UserProfile%\AppData\Local\Microsoft\Edge{, Beta, Dev, SxS}\User Data\<profile>\{History*,Shortcuts*}`<br>`%UserProfile%\AppData\Local\Google\Chrome{, Beta, Dev, SxS}\User Data\<profile>\{History*,Shortcuts*}`, and `Archived History*` for Chrome's stable channel<br>`%UserProfile%\AppData\Local\Chromium\User Data\<profile>\{History*,Shortcuts*}`<br>`%SystemRoot%\System32\config\systemprofile\AppData\Local\` paths for Chrome (all channels), Chromium, Prisma Access Browser, Supermium and Wave<br>`%UserProfile%\AppData\Local\Microsoft\Windows\WebCache\*` (IE 10/11, legacy Edge)<br>`index.dat` under `%UserProfile%\AppData\Local\Microsoft\Windows\History\` (recursive; IE 9 and earlier)<br>`%UserProfile%\AppData\Roaming\Microsoft\Windows\IEDownloadHistory\index.dat` (IE 9 downloads)<br>XP: `%UserProfile%\Local Settings\Application Data\` paths for Chrome (all channels) and Chromium; `index.dat` under `%UserProfile%\Local Settings\History\History.IE5\` (recursive)<br>The equivalent paths for Brave, Vivaldi, Opera, Yandex, Coc Coc, QQ Browser, UC Browser, 360 Secure Browser, Arc, Wave, Supermium, Prisma Access Browser, Firefox and Safari for Windows (`History.plist`, `Downloads.plist`), with their legacy and XP forms: the Browser History row of `$artefacts` in [collector.ps1](collector.ps1) |
+| Browser Preferences | `%UserProfile%\AppData\Local\Microsoft\Edge{, Beta, Dev, SxS}\User Data\<profile>\Preferences`<br>`%UserProfile%\AppData\Local\Google\Chrome{, Beta, Dev, SxS}\User Data\<profile>\Preferences`<br>`%UserProfile%\AppData\Roaming\Mozilla\Firefox\Profiles\*\prefs.js`<br>The equivalent paths for Chromium, Brave, Vivaldi, Yandex, Arc, Coc Coc, QQ Browser, UC Browser, 360 Secure Browser, Wave, Prisma Access Browser and Supermium, with their XP forms: the Browser Preferences row of `$artefacts` in [collector.ps1](collector.ps1) |
+| Browser Sessions | `%UserProfile%\AppData\Local\Microsoft\Edge{, Beta, Dev, SxS}\User Data\<profile>\Sessions\*`<br>`%UserProfile%\AppData\Local\Google\Chrome{, Beta, Dev, SxS}\User Data\<profile>\Sessions\*`<br>`%UserProfile%\AppData\Roaming\Mozilla\Firefox\Profiles\*\sessionstore*` and `...\sessionstore-backups\` (recursive)<br>`%UserProfile%\AppData\Local\Microsoft\Internet Explorer\{Recovery,TabRoaming}\` (recursive; IE)<br>The equivalent paths for Chromium, Brave (its Default profile only), Vivaldi, Yandex, Arc, Coc Coc, QQ Browser, UC Browser, 360 Secure Browser, Wave, Prisma Access Browser and Supermium, with their XP forms: the Browser Sessions row of `$artefacts` in [collector.ps1](collector.ps1) |
 | File History Catalogs | `%UserProfile%\AppData\Local\Microsoft\Windows\FileHistory\Configuration\Catalog*.edb` |
 | JumpLists | `%UserProfile%\AppData\Roaming\Microsoft\Windows\Recent\AutomaticDestinations\*.automaticDestinations-ms`<br>`%UserProfile%\AppData\Roaming\Microsoft\Windows\Recent\CustomDestinations\*.customDestinations-ms` |
 | LNK | `%UserProfile%\AppData\Roaming\Microsoft\Windows\Recent\*.lnk`<br>`%UserProfile%\AppData\Roaming\Microsoft\Office\Recent\` (recursive)<br>`%UserProfile%\Desktop\*.lnk`<br>`%UserProfile%\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\*.lnk`<br>`%ProgramData%\Microsoft\Windows\Start Menu\Programs\*.lnk`<br>`%UserProfile%\Recent\` (recursive; XP)<br>`%SystemDrive%\System Volume Information\_restore*\RP*\*.lnk` (XP restore points) |
 | .NET CLR Usage Logs | `%UserProfile%\AppData\Local\Microsoft\CLR_*\` (recursive, `*.log`)<br>`%SystemRoot%\System32\config\systemprofile\AppData\Local\Microsoft\CLR_*\` (recursive, `*.log`)<br>`%SystemDrive%\Windows.old\Windows\System32\config\systemprofile\AppData\Local\Microsoft\CLR_*\` (recursive, `*.log`) |
-| OneDrive Metadata | `%UserProfile%\AppData\Local\Microsoft\OneDrive\settings\` (recursive)<br>`%UserProfile%\AppData\Local\Microsoft\OneDrive\logs\` (recursive: `*.odl*`, `*.aodl`, `*.loggz`, `*.keystore`; not the `.etlgz` traces)<br>`%UserProfile%\AppData\Local\Microsoft\SkyDrive\logs\` (recursive; SkyDrive)<br>`%UserProfile%\AppData\Local\Microsoft\Windows\OneDrive\logs\` (recursive; Windows 8.1) |
+| OneDrive ETL Traces | `%UserProfile%\AppData\Local\Microsoft\Windows\SkyDrive\logs\*.etl` (Windows 8.1) |
+| OneDrive Metadata | `%UserProfile%\AppData\Local\Microsoft\OneDrive\settings\` (recursive)<br>`%UserProfile%\AppData\Local\Microsoft\OneDrive\logs\` (recursive: `*.odl*`, `*.aodl`, `*.loggz`, `*.keystore`; not the `.etlgz` traces), and `...\logs\Personal\SyncDiagnostics.log`<br>`%UserProfile%\AppData\Local\Microsoft\SkyDrive\logs\` (recursive; SkyDrive)<br>`%UserProfile%\AppData\Local\Microsoft\Windows\OneDrive\logs\` (recursive; Windows 8.1)<br>`%UserProfile%\AppData\Local\Microsoft\Windows\SkyDrive\logs\SyncDiagnostics.log` (Windows 8.1) |
 | PowerShell History | `%UserProfile%\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\*_history.txt`<br>`%SystemRoot%\{System32,SysWOW64}\config\systemprofile\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\*_history.txt` |
 | PowerShell Transcripts | `%UserProfile%\Documents\PowerShell_transcript.*.txt` and `%UserProfile%\Documents\20*\PowerShell_transcript.*.txt`<br>`%UserProfile%\OneDrive*\Documents\PowerShell_transcript.*.txt` and `...\Documents\20*\PowerShell_transcript.*.txt`<br>`%SystemRoot%\{System32,SysWOW64}\*\PowerShell_transcript.*.txt`<br>`%SystemDrive%\PSTranscript\20*\PowerShell_transcript.*.txt`<br>the policy transcription folder, if on a local drive (recursive) |
 | Recycle Bin | `<drive>\$Recycle.Bin\<SID>\$I*` on every local drive (FAT/exFAT: `<drive>\$Recycle.Bin\$I*`)<br>`INFO2` under `<drive>\RECYCLE*\` (recursive; XP `RECYCLER`/`RECYCLED`) |
-| Registry Hives (user) | `%UserProfile%\NTUSER.DAT`<br>`%UserProfile%\AppData\Local\Microsoft\Windows\UsrClass.dat`<br>`%SystemRoot%\System32\config\DEFAULT` (SYSTEM)<br>`%SystemRoot%\System32\config\systemprofile\NTUSER.DAT`<br>`%SystemRoot%\ServiceProfiles\{LocalService,NetworkService}\NTUSER.DAT`<br>`%SystemDrive%\Windows.old\Windows\`, the same four service-account hives<br>each with its `.LOG1`/`.LOG2` |
+| Registry Hives (user) | `%UserProfile%\NTUSER.DAT`<br>`%UserProfile%\AppData\Local\Microsoft\Windows\UsrClass.dat`<br>`%UserProfile%\Local Settings\Application Data\Microsoft\Windows\UsrClass.dat` (XP)<br>`%SystemRoot%\System32\config\DEFAULT` (SYSTEM)<br>`%SystemRoot%\System32\config\systemprofile\NTUSER.DAT`<br>`%SystemRoot%\ServiceProfiles\{LocalService,NetworkService}\NTUSER.DAT`<br>`%SystemDrive%\Windows.old\Windows\`, the same four service-account hives<br>each with its `.LOG`/`.LOG1`/`.LOG2` |
 | Startup Folders | `%ProgramData%\Microsoft\Windows\Start Menu\Programs\StartUp\` (recursive)<br>`%UserProfile%\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\` (recursive) |
 | Teams Logs | `%UserProfile%\AppData\Local\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\Logs\*`<br>`%UserProfile%\AppData\Local\Packages\MicrosoftTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\Logs\*` (Windows 11 built-in Teams)<br>`%UserProfile%\AppData\Roaming\Microsoft\Teams\logs.txt` (classic Teams) |
+| Thumbcache | `%UserProfile%\AppData\Local\Microsoft\Windows\Explorer\thumbcache_idx.db` (the index only, not the cached thumbnails) |
 | WER | `%ProgramData%\Microsoft\Windows\WER\` (recursive, `*.wer`)<br>`%UserProfile%\AppData\Local\Microsoft\Windows\WER\` (recursive, `*.wer`) |
-| Windows Timeline | `ActivitiesCache.db*` under `%UserProfile%\AppData\Local\ConnectedDevicesPlatform\` (recursive; Windows 10) |
+| Windows Timeline | `ActivitiesCache.db*` under `%UserProfile%\AppData\Local\ConnectedDevicesPlatform\` (recursive) |
 
 ## What it can't collect
 
@@ -230,21 +263,29 @@ ready-to-paste `getfile` command at the end.
 | Artefact | Why | What it would take | Alternative |
 |---|---|---|---|
 | `$MFT` (each NTFS drive) | NTFS metafile | NTFS parser | `getfile` (printed) |
+| `$MFTMirr` (each NTFS drive) | NTFS metafile | NTFS parser | Not printed: `$MFT`'s `getfile` is |
 | `$LogFile` (each NTFS drive) | NTFS metafile | NTFS parser | Not possible via `getfile` (reported as an empty file); Velociraptor Offline Collector |
 | `$UsnJrnl:$J` (each NTFS drive) | NTFS metafile (alternate data stream) | NTFS parser | Not possible via `getfile`; Velociraptor Offline Collector |
 | File-system metadata of FAT and exFAT drives (allocation table, directory entries) | Not stored as files | FAT/exFAT parser | Not possible via `getfile`; a raw-disk collector |
 | System hives (`SAM`, `SECURITY`, `SOFTWARE`, `SYSTEM`) and their transaction logs | Held exclusively by the kernel while loaded | NTFS parser | `getfile` for the hives (printed) |
+| Shadow copy catalogue (`System Volume Information\{3808876b-c176-4e48-b7ae-04046e6cc752}`, each NTFS drive) | Access denied, even to SYSTEM | NTFS parser | `getfile` (printed) |
 | SRUM (`SRUDB.dat` and its ESE files) | Sometimes held open by the system (collected when it isn't) | NTFS parser | `getfile` (printed) |
 | BITS (`qmgr.db` and its ESE files) | Held by the BITS service while it runs: a demand-start service that stops itself when idle (collected when stopped) | NTFS parser | `getfile` (printed) |
 | Service account hives (`DEFAULT`, LocalService and NetworkService `NTUSER.DAT`) and their transaction logs | Loaded while Windows runs | NTFS parser | `getfile` manually (not printed) |
 | User Access Logging `Current.mdb` (servers) | Usually held open by the UAL service | NTFS parser | `getfile` (printed) |
 | User hives of logged-on users (`NTUSER.DAT`, `UsrClass.dat`) and their transaction logs | Held exclusively while the user is logged on | NTFS parser | `getfile` for the hives (printed) |
 | `WebCacheV01.dat` of logged-on users | Usually held open in the user's session | NTFS parser | `getfile` manually (not printed) |
+| Internet Explorer's cookie `index.dat` (Browser Cookies) | Locked from boot | NTFS parser | `getfile` manually (not printed) |
 
 Hives of users who are not logged on, and most other in-use files (EVTX, a
 running browser's History), are collected normally. If any other
 machine-wide file turns out to be locked, it is added to the printed `getfile`
 list (registry transaction logs excepted).
+
+The BCD store (`Boot\BCD`, `EFI\Microsoft\Boot\BCD` and
+`EFI\Microsoft\Recovery\BCD`, on the system partition) is not collected and
+has no summary line: the collector has no row for the system partition's
+files, and reads only drives with a letter.
 
 ## How it works
 
@@ -266,14 +307,15 @@ list (registry transaction logs excepted).
   downloaded; it is in `collection.csv` as `not local` and counted as not
   accessible.
 - **Warnings.** Anything worth a closer look is listed in one Warnings
-  section: shown at the start if known by then, and again before the summary
-  (or "Warnings: none"). It covers unusual gaps (artefacts that should exist
-  on this host but are missing, and unexplained locks), not running as
-  SYSTEM, a fallback output folder, folders that couldn't be listed, copies
-  that failed part-way, a zip that couldn't be split into volumes, a file over
-  `getfile`'s 3 GB limit, a SHA-256 that couldn't be calculated, files not
-  read because their content isn't on the disk, user profiles outside the
-  folders searched, and a run that had to stop.
+  section: shown at the start with what is known by then, and again before
+  the summary, reading `none` when empty. It covers unusual gaps (artefacts
+  that should exist on this host but are missing, and unexplained locks), not
+  running as SYSTEM, a fallback output folder, folders that couldn't be
+  listed, copies that failed part-way, a zip that couldn't be split into
+  volumes, a file over `getfile`'s per-file limit (3 GB in Microsoft's
+  documentation), a SHA-256 that couldn't be
+  calculated, files not read because their content isn't on the disk, user
+  profiles outside the folders searched, and a run that had to stop.
 - **Fail closed.** A folder that exists but can't be listed counts as *Not
   accessible*, never *Missing*, and is named under the summary. A copy that
   fails part-way stays in the zip, incomplete (a zip can't drop an entry once
@@ -319,19 +361,29 @@ list (registry transaction logs excepted).
   name with the run's console output. The collector doesn't delete its output.
 - **Footprint.** Writes the output folder, the zip (or its volumes) and its
   log, and stops collecting once less than 1 GiB is free on the drive (checked
-  before each file and after each 1 MB copied); nothing is downloaded or
+  before each file and after each 1 MiB copied); nothing is downloaded or
   installed, and no child processes are started.
-- **Live Response limits.** `getfile` retrieves up to 3 GB per file, and slow
-  links can time out first; `run` commands time out after 30 minutes. Split
-  volumes keep each `getfile` well within its size and time limits; the
-  script doesn't stop itself early, so a `run` over 30 minutes times out.
+- **Live Response limits.** `getfile` retrieves up to 3 GB per file (in
+  Microsoft's documentation), and slow links can time out first; `run`
+  commands time out after 30 minutes. Split volumes keep each `getfile` well
+  within its size and time limits; the script doesn't stop itself early, so a
+  `run` over 30 minutes times out.
 
 ## Reading the summary
 
 ![Live Response console: the end of the run - the Warnings section with one unusual gap (BITS, 7 collected and 3 not accessible), the artefact summary with a status and, where a gap is normal for the host, its reason for each of the 31 artefacts, the number of files collected, the getfile command for the zip, its SHA-256 and the getfile command for the run log](docs/images/live-response-summary.webp)
 
-The end of the same Live Response run, from 2.2.0 (since 2.2.1 the size reads
-"MB compressed").
+The end of the same 2.2.0 run. Since 2.3.0 there are 47 summary lines and
+the size reads "MiB compressed".
+
+At the end come the Warnings again, the artefact summary and the lists under
+it (folders not listed, copies whose size differs), the total
+(`Collected <n> files total (<size> MiB compressed)`, where the size is the
+zip's; `Collected <n> files before the run stopped (...)` for a partial
+collection) and, if the collection is complete, the `getfile` lines and any
+**Additional inaccessible artefacts**; last comes
+`Finished <UTC>, after <h>:<mm>:<ss>`. Counts use a comma as the thousands
+separator; sizes are in binary units (KiB, MiB, GiB) with two decimals.
 
 - **N collected:** copied into the zip.
 - **Not accessible:** the file (or a folder holding it) exists but could not
@@ -350,17 +402,20 @@ this Windows version" for legacy-only artefacts); for files that are normally
 locked, **(requires NTFS parser)** (see
 [What it can't collect](#what-it-cant-collect)), only when at least one file
 failed the way that lock does (held by another process; for the NTFS
-metafiles, access denied) and every file that couldn't be opened did. Any other failure, such as a file gone
-before it was opened or access denied to an account other than SYSTEM, leaves
-the gap unexplained, under Warnings. A Missing status without a note
-is listed under Warnings only if the artefact should exist on this host (e.g.
-event logs, or Prefetch on a workstation); many artefacts may simply be absent
-(e.g. PowerShell transcripts) and are not warned about. A folder that couldn't
-be listed, or a copy that failed part-way, always puts its artefact under
-Warnings, whatever its note.
+metafiles and the shadow copy catalogue, access denied) and every file that
+couldn't be opened did. Any other failure, such as a
+file gone before it was opened or access denied to an account other than
+SYSTEM, leaves the gap unexplained, under Warnings. A Missing status without
+a note is listed under Warnings only if the artefact should exist on this
+host (e.g. event logs, or Prefetch on a workstation); many artefacts may
+simply be absent (e.g. PowerShell transcripts) and are not warned about. A
+folder that couldn't be listed, or a copy that failed part-way, always puts
+its artefact under Warnings, whatever its note.
 
-Browser History counts browser profiles, not files; a profile counts as
-collected only if its history database was read (a locked database with
+Browser Bookmarks, Cookies, Extensions, History and Preferences count browser
+profiles, not files (Browser Sessions counts files); a profile counts as
+collected only if every main file in it was read, e.g. its history
+database and `Shortcuts` (a locked history database with
 readable journal or logs is *Not accessible*). Empty files are not counted:
 an artefact whose only files are empty reads *Missing*. File symbolic links
 are not counted either.
@@ -374,9 +429,10 @@ are not counted either.
   </tr>
 </table>
 
-![Notepad: the run log beside the zip - the banner with the collector's version, the host and the UTC start time, the OS and the drives searched, the Warnings section and the 31 progress lines, one per artefact](docs/images/run-log.webp)
+![Notepad: the run log beside the zip - latro and its version, the header fields (the UTC start time, the host, the OS, the run log's path and the drives searched), the Warnings section and the 47 progress lines, one per artefact](docs/images/run-log.webp)
 
-The zip in Explorer and the run log in Notepad, from the test machine's run.
+The zip in Explorer, from a test machine run before 2.3.0, and the run log
+in Notepad, from 2.3.0 (an elevated run, so its one warning).
 
 - The zip holds the files as they were read during the run, at that point in
   time, under their original paths. The SHA-256 printed with it identifies
@@ -389,9 +445,10 @@ The zip in Explorer and the run log in Notepad, from the test machine's run.
   every file collected or found but not readable, what happened to it: the
   outcome, the size when opened and the bytes copied, the SHA-256 of what the
   zip holds for it, and its created, modified and accessed times as the file
-  system reported them just before the file was opened. Each zip entry's time
-  is the file's last-write time in UTC, to the 2 seconds the zip format holds;
-  the MFT change time is not recorded.
+  system reported them just before the file was opened, in UTC. Each zip
+  entry's time is the file's last-write time in UTC, written as a DOS time,
+  which has no time zone and a 2-second resolution; the MFT change time is
+  not recorded.
 - A file that was being written to while it was copied is in the zip as it was
   read, and is named under the summary and in `collection.csv` as
   `size changed`. `collected` means the read completed; a change that keeps
@@ -413,8 +470,8 @@ The zip in Explorer and the run log in Notepad, from the test machine's run.
   later. The zip's SHA-256 fixes what was collected.
 - No following of links: folder links and file symbolic links are skipped,
   and not recorded.
-- No third-party application artefacts beyond browser history, and no browser
-  data beyond history (no cookies, caches or saved passwords).
+- No third-party application artefacts beyond browsers', and no browser
+  caches or saved passwords.
 - No cleanup: the output stays in its folder until you remove it.
 - No time-limit handling: a run that reaches Live Response's 30-minute limit
   is cut off by Live Response.
@@ -428,11 +485,12 @@ welcome.
   (its fields are documented above the table) and a row in this README's
   table; a legacy form of an existing artefact is another path pattern in its
   row, after the current one.
-- **Conventions:** Windows PowerShell 5.1 only, no modules, no child
-  processes or `Add-Type`; PSScriptAnalyzer-clean; times in UTC; British
-  spelling in output and documentation. Full-word names; a function returns
-  its outcome rather than setting shared state. Every failure is isolated to
-  its own location and reported, never silent.
+- **Conventions:** Windows PowerShell 5.1 and Microsoft's in-box modules
+  only, nothing installed first; no child processes, and `Add-Type` only to
+  load .NET's `System.IO.Compression` assemblies; PSScriptAnalyzer-clean;
+  times in UTC; British spelling in output and documentation. Full-word
+  names; a function returns its outcome rather than setting shared state.
+  Every failure is isolated to its own location and reported, never silent.
 - Changes are listed in [CHANGELOG.md](CHANGELOG.md).
 
 ## Licence

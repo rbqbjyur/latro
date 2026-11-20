@@ -4,6 +4,89 @@ Notable changes to `collector.ps1`. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 2.3.0 - 2026-11-20
+
+### Added
+- `$MFTMirr` on every NTFS drive: a summary placeholder like `$MFT`'s,
+  *Not accessible (requires NTFS parser)*, with no `getfile` line (the one
+  for `$MFT` is printed).
+- Browser Bookmarks, Browser Cookies, Browser Preferences and Browser
+  Extensions (Firefox's `extensions.json`), counted per browser profile, and
+  Browser Sessions, counted per file. A lock on Browser Cookies (Internet
+  Explorer's cookie `index.dat` is locked from boot) gets "(requires NTFS
+  parser)".
+- Server logs, found only where the role or product is installed (elsewhere
+  they read *Missing*, with no note): DHCP Server Logs (the audit log), DNS
+  Server Logs (the `dns` folder and the analytical log), Exchange Server Logs
+  (transport logs), IIS Logs (the sites' logs and HTTP.sys's error logs) and
+  SQL Server Logs (each instance's `ERRORLOG` files).
+- Event Trace Logs: every file under `System32\LogFiles\WMI`, its subfolders
+  (`RtBackup` among them) included.
+- OneDrive ETL Traces: the `.etl` traces of Windows 8.1's built-in client.
+- MSRT Log: `Windows\debug\mrt.log`.
+- Shadow Copy Catalog: the shadow copy catalogue at each NTFS drive's root,
+  not the shadow copies' stores. Even SYSTEM is denied it, so it reads
+  *Not accessible (requires NTFS parser)*, with a `getfile` line.
+- Thumbcache: Explorer's `thumbcache_idx.db`, not the cached thumbnails.
+- Registry Hives (system): the `COMPONENTS` and `ELAM` hives and AppLocker's
+  `AppCache.dat`.
+- Registry Hives (user): `UsrClass.dat` in XP profiles.
+- Scheduled Tasks: `Windows\Tasks\SchedLgU.txt`.
+- OneDrive Metadata: `SyncDiagnostics.log`, from the current client's
+  `logs\Personal` folder and from Windows 8.1's built-in client.
+- Browser History: `Shortcuts` for the Chromium-family browsers except
+  Vivaldi and Opera, Chrome's `Archived History`, UC Browser, Safari's
+  `Downloads.plist`, and Firefox's `history.dat` in XP profiles.
+
+### Changed
+- Named latro: the console's first line reads `latro 2.3.0` (was
+  `Live Response collector v2.2.1`), and the help's synopsis and link name it
+  (`https://github.com/rbqbjyur/latro`). The script is still `collector.ps1`.
+- The opening lines are `Label : value` fields: `Started`, `Host`, `OS`,
+  `Log` (the run log's path, new; left out when no log was created) and
+  `Drives` (were `Host <name>, started <UTC>`, `OS ...` and `Drives ...`).
+  The two stops before the zip exists (the zip library can't be loaded, the
+  output zip can't be created) print the fields without `Log`, then a blank
+  line and the error.
+- The Warnings section at the start is always printed; when empty, it and
+  the closing one read `none` on the line under `Warnings:` (was
+  `Warnings: none` at the end, nothing at the start).
+- The last line reads `Finished <UTC>, after <h>:<mm>:<ss>` (was
+  `Finished <UTC>`).
+- Counts have a comma as the thousands separator (e.g. `1,204 collected`).
+- Sizes are in IEC binary units with two decimals and a comma as the
+  thousands separator. The total line reads `(<n> MiB compressed)` (was
+  `MB`), e.g. `(1,234.56 MiB compressed)`; the free-space reserve reads
+  `1.00 GiB` (was `1 GiB`); the split's no-room message (`<drive> has <free>
+  free, less than <needed> above the reserve (<reserve>)`) gives all three
+  sizes in the largest unit each reaches (were GiB, e.g. `0.5 GiB`).
+- The warning for a file over getfile's limit gives its size in IEC units
+  and reads "over getfile's per-file limit (3 GB in Microsoft's
+  documentation)" (was "N GB, over getfile's 3 GB per-file limit").
+- Byte counts in the split and undo error messages and in the "Copies whose
+  size differs" list are printed in full with thousands separators
+  (e.g. `412,000,000 bytes`).
+- Internet Explorer's download history is taken from
+  `AppData\Roaming\Microsoft\Windows\IEDownloadHistory\index.dat` (was
+  `AppData\Local\Microsoft\Windows\IEDownloadHistory\**\index.dat`).
+- BITS: a lock on `qmgr.db`, held by the BITS service while it runs, is
+  expected: "(requires NTFS parser)", not an unusual gap.
+- A missing Windows Timeline is no longer explained, on Windows 11 ("not on
+  this Windows version") or on Windows Server ("normal for Windows Server"),
+  nor a missing SRUM on Windows Server: each reads *Missing*, with no note.
+
+### Fixed
+- The size in the warning for a file over getfile's limit took the host's
+  decimal separator, the start and finish times its time separator, and
+  the zip's name its calendar (another year under a non-Gregorian one);
+  every number and time on the console and in the run log, and the zip's
+  name, is now formatted in the invariant culture.
+- An OS name that couldn't be read, with the build known, left the `OS`
+  line out of the opening with no warning; the `OS` field now reads
+  `not determined` (with the build, where known) and a warning says so. A
+  missing build was read as build 0 and skipped the "Host details could
+  not be fully determined" warning.
+
 ## 2.2.1 - 2026-10-27
 
 ### Changed

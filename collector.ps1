@@ -3,8 +3,8 @@
 
 <#
 .SYNOPSIS
-    Collects timeline-relevant Windows triage artefacts into one zip, for
-    retrieval through Microsoft Defender for Endpoint (MDE) Live Response.
+    latro: collects timeline-relevant Windows triage artefacts into one zip,
+    for retrieval through Microsoft Defender for Endpoint (MDE) Live Response.
 
 .DESCRIPTION
     Upload to the Defender Live Response library and run it on a device. It
@@ -41,11 +41,11 @@
 
 .NOTES
     Version: $CollectorVersion below (semver); changes are in CHANGELOG.md.
-    Requires Windows PowerShell 5.1; no modules, no network access.
+    Requires Windows PowerShell 5.1 (in-box modules only); no network access.
     License: 0BSD.
 
 .LINK
-    https://github.com/rbqbjyur/defender-live-response-collector
+    https://github.com/rbqbjyur/latro
 #>
 
 # Every empty catch {} in this script is deliberate: it guards a step whose
@@ -61,7 +61,7 @@ param()
 
 # ============================== CONFIG ==============================
 
-$CollectorVersion = '2.2.1'
+$CollectorVersion = '2.3.0'
 
 # No script-wide error suppression: every unit of work has its own try/catch,
 # so an error nobody anticipated shows (in the Live Response transcript) rather
@@ -76,7 +76,7 @@ if (-not $systemDrive) { $systemDrive = [System.IO.Path]::GetPathRoot([Environme
 $hostName = $env:COMPUTERNAME
 # UTC, so the name is unambiguous across time zones; trailing 'Z' marks it as UTC.
 $runStart  = (Get-Date).ToUniversalTime()
-$timestamp = $runStart.ToString('yyyyMMdd_HHmmss') + 'Z'
+$timestamp = $runStart.ToString('yyyyMMdd_HHmmss', [Globalization.CultureInfo]::InvariantCulture) + 'Z'
 
 # Where the output goes, in order of preference: the first folder that can be
 # created and holds the zip wins. Only the last folder in each path is ever
@@ -151,21 +151,24 @@ $gapReasons = @{
 #            per-drive artefacts such as the Recycle Bin.
 #   User     Path pattern(s) relative to each user profile.
 #   TransactionLogs  Also collect each match's registry transaction logs
-#            (<file>.LOG1/.LOG2). Those never get a printed getfile command.
+#            (<file>.LOG*: .LOG, .LOG1, .LOG2). Those never get a printed
+#            getfile command.
 #   Literal  Use the path as-is, without listing it. For NTFS metafiles, which
 #            PowerShell can neither see nor open: they stay as 'Not accessible'
 #            placeholders so future raw/sensor-based collection slots in cleanly.
-#   GetFile  Literal rows only: the Defender sensor's getfile can fetch it, so the
-#            command is printed at the end if the read failed.
+#   GetFile  The Defender sensor's getfile may fetch it, so the command is printed
+#            at the end if the read failed, without testing that the file exists
+#            (PowerShell can neither see the NTFS metafiles nor test a file it
+#            is denied, such as the shadow copy catalogue).
 #   FollowUp Which of the row's locked files get a printed getfile command:
 #            'System' (machine-wide paths; the default) or 'User' (user-profile
 #            paths).
 #   CountBy  'Folder' counts one unit per folder holding matches (e.g. per browser
 #            profile) instead of one per file.
 #   SupportingFiles  CountBy rows: file-name patterns of supporting files
-#            (journals, ESE logs). A unit counts as collected only if its main
-#            file was read; supporting files alone don't count while a main file
-#            is present.
+#            (journals, ESE logs). A unit counts as collected only if every main
+#            file in it was read; supporting files alone don't count while a
+#            main file is present.
 #   ExpectMissing  Rules for when "Missing" is normal for this artefact: a list of
 #            @{ When = { condition on $hostInfo, see Get-HostInfo }; Why = <a reason
 #            from $gapReasons> }. The first rule that holds gives the note "(<Why>)".
@@ -201,6 +204,7 @@ $artefacts = @(
     # is not access denied, so it isn't explained away.
     @{ Name = '$LogFile';    Group = 1; Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; System = '$LogFile' }   # no getfile route (reported as empty)
     @{ Name = '$MFT';        Group = 1; Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; GetFile = $true; System = '$MFT' }
+    @{ Name = '$MFTMirr';    Group = 1; Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; System = '$MFTMirr' }   # no getfile line: $MFT's is the one printed
     @{ Name = '$UsnJrnl:$J'; Group = 1; Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; System = '$Extend\$UsnJrnl:$J' }   # no getfile route
 
     # 2. Other system files.
@@ -219,7 +223,7 @@ $artefacts = @(
            'Windows.old\Windows\AppCompat\Programs\RecentFileCache.bcf'
        ) }
     # BITS job database (qmgr.db) and its ESE logs: downloads and persistence.
-    @{ Name = 'BITS';          Group = 2; ExpectPresent = { $true }; System = 'ProgramData\Microsoft\Network\Downloader\**\*' }
+    @{ Name = 'BITS';          Group = 2; ExpectPresent = { $true }; ExpectLocked = { <# qmgr.db, held by the BITS service while it runs #> $true }; System = 'ProgramData\Microsoft\Network\Downloader\**\*' }
     # Defender text logs (MPLog etc.) and detection history; not the quarantine
     # (file content). Defender event logs are covered by Event Logs.
     @{ Name = 'Defender Logs'; Group = 2; System = @(
@@ -230,11 +234,24 @@ $artefacts = @(
         'ProgramData\Microsoft\Microsoft AntiMalware\Support\**\*'      # older Defender / SCEP
         'Windows.old\Windows\Temp\MpCmdRun.log'
     ) }
+    # DHCP Server audit log; only where the DHCP Server role is installed and its
+    # audit logging is on.
+    @{ Name = 'DHCP Server Logs'; Group = 2; System = 'Windows\System32\dhcp\DhcpSrvLog-*.log' }
+    # DNS Server: the Dns folder (the debug log, once it is enabled) and the
+    # analytical log; only where the DNS Server role is installed.
+    @{ Name = 'DNS Server Logs'; Group = 2; System = @(
+        'Windows\System32\dns\**\*'
+        'Windows\System32\winevt\Logs\Microsoft-Windows-DNSServer%4Analytical.etl'
+    ) }
     @{ Name = 'Event Logs'; Group = 2; ExpectPresent = { $true }; System = @(
         'Windows\System32\winevt\logs\*.evtx'
         'Windows\System32\config\*.evt'                                  # XP
         'Windows.old\Windows\System32\winevt\logs\*.evtx'
     ) }
+    # Event trace logs (.etl) under LogFiles\WMI, RtBackup among them.
+    @{ Name = 'Event Trace Logs'; Group = 2; System = 'Windows\System32\LogFiles\WMI\**\*' }
+    # Exchange Server's transport logs; only where Exchange Server is installed.
+    @{ Name = 'Exchange Server Logs'; Group = 2; System = 'Program Files\Microsoft\Exchange Server\*\TransportRoles\Logs\**\*.log' }
     @{ Name = 'Firewall Log'; Group = 2; ExpectMissing = @(@{ When = { $true }; Why = $gapReasons.OffByDefault }); System = @(                     # logging off by default
         'Windows\System32\LogFiles\Firewall\pfirewall.*'
         'Windows.old\Windows\System32\LogFiles\Firewall\pfirewall.*'
@@ -251,6 +268,16 @@ $artefacts = @(
            'Windows.old\Windows\System32\GroupPolicy\*\Scripts\**\*'
        )
        User = 'AppData\Local\Microsoft\Group Policy\History\**\*' }
+    # IIS: the sites' logs and HTTP.sys's error logs; only where IIS is installed.
+    @{ Name = 'IIS Logs'; Group = 2; System = @(
+        'inetpub\logs\LogFiles\*.log'
+        'inetpub\logs\LogFiles\*\**\*.log'                             # per site
+        'Windows\System32\LogFiles\HTTPERR\*.log'                       # HTTP.sys
+        'Windows\System32\LogFiles\W3SVC*\*.log'
+        'Windows.old\Windows\System32\LogFiles\W3SVC*\*.log'
+    ) }
+    # The Malicious Software Removal Tool's log.
+    @{ Name = 'MSRT Log'; Group = 2; System = 'Windows\debug\mrt.log' }
     @{ Name = 'Prefetch'; Group = 2; ExpectPresent = { <# on by default on workstations #> $hostInfo.Server -eq $false }; ExpectMissing = @(@{ When = { $hostInfo.Server }; Why = $gapReasons.Server }); System = @(
         'Windows\Prefetch\*.pf'
         'Windows.old\Windows\Prefetch\*.pf'
@@ -263,6 +290,9 @@ $artefacts = @(
         'Windows\System32\config\SECURITY'
         'Windows\System32\config\SOFTWARE'
         'Windows\System32\config\SYSTEM'
+        'Windows\System32\config\COMPONENTS'
+        'Windows\System32\config\ELAM'
+        'Windows\System32\AppLocker\AppCache.dat'
         'Windows\System32\config\RegBack\SAM'
         'Windows\System32\config\RegBack\SECURITY'
         'Windows\System32\config\RegBack\SOFTWARE'
@@ -291,6 +321,7 @@ $artefacts = @(
            'Windows\System32\config\systemprofile\AppData\Local\Microsoft\Windows\PowerShell\ScheduledJobs\**\*'
            'Windows\SysWOW64\config\systemprofile\AppData\Local\Microsoft\Windows\PowerShell\ScheduledJobs\**\*'
            'Windows\Tasks\*.job'                                         # legacy at.exe / Task Scheduler 1.0
+           'Windows\Tasks\SchedLgU.txt'                                  # legacy Task Scheduler log
            'Windows\SchedLgU.txt'                                        # legacy Task Scheduler log
            'Windows.old\Windows\System32\Tasks\**\*'
            'Windows.old\Windows\Tasks\*.job'
@@ -303,8 +334,16 @@ $artefacts = @(
         'Windows\setupapi.log'                                           # XP
         'Windows.old\Windows\INF\setupapi*.log'
     ) }
+    # The shadow copy catalogue at each NTFS volume's root: one entry per shadow
+    # copy, with its creation time. Not the shadow copies' stores (content).
+    @{ Name = 'Shadow Copy Catalog'; Group = 2; Drives = 'NTFS'; ExpectLocked = { <# access denied even to SYSTEM #> $true }; ExpectedOpenError = 'AccessDenied'; GetFile = $true; System = 'System Volume Information\{3808876b-c176-4e48-b7ae-04046e6cc752}' }
+    # SQL Server's error logs, per instance; only where SQL Server is installed.
+    @{ Name = 'SQL Server Logs'; Group = 2; System = @(
+        'Program Files\Microsoft SQL Server\*\MSSQL\LOG\ERRORLOG*'
+        'Program Files (x86)\Microsoft SQL Server\*\MSSQL\LOG\ERRORLOG*'
+    ) }
     # SRUDB.dat plus its ESE logs and checkpoint, for dirty-database recovery.
-    @{ Name = 'SRUM'; Group = 2; ExpectPresent = { <# workstations, Windows 8+ #> $hostInfo.Server -eq $false -and $hostInfo.Build -ge 9200 }; ExpectMissing = @(@{ When = { $hostInfo.Server }; Why = $gapReasons.Server }; @{ When = { $hostInfo.Build -and $hostInfo.Build -lt 9200 }; Why = $gapReasons.WindowsVersion }); ExpectLocked = { <# often held open #> $true }; System = @(
+    @{ Name = 'SRUM'; Group = 2; ExpectPresent = { <# workstations, Windows 8+ #> $hostInfo.Server -eq $false -and $hostInfo.Build -ge 9200 }; ExpectMissing = @(@{ When = { $hostInfo.Build -and $hostInfo.Build -lt 9200 }; Why = $gapReasons.WindowsVersion }); ExpectLocked = { <# often held open #> $true }; System = @(
         'Windows\System32\SRU\**\*'
         'Windows.old\Windows\System32\SRU\**\*'
     ) }
@@ -321,11 +360,79 @@ $artefacts = @(
            'Windows.old\Windows\System32\config\systemprofile\AppData\Local\Microsoft\CLR_*\**\*.log'
        )
        User = 'AppData\Local\Microsoft\CLR_*\**\*.log' }
+    # Browser bookmarks: one pattern per browser (or channel), counted per user x
+    # browser x profile, in Browser History's order; legacy Edge's Spartan.edb;
+    # XP profile paths last.
+    @{ Name = 'Browser Bookmarks'; Group = 3; CountBy = 'Folder'
+       User = @(
+           'AppData\Local\Microsoft\Edge\User Data\*\Bookmarks*'                        # Edge
+           'AppData\Local\Microsoft\Edge Beta\User Data\*\Bookmarks*'                   # Edge Beta
+           'AppData\Local\Microsoft\Edge Dev\User Data\*\Bookmarks*'                    # Edge Dev
+           'AppData\Local\Microsoft\Edge SxS\User Data\*\Bookmarks*'                    # Edge Canary
+           'AppData\Local\Google\Chrome\User Data\*\Bookmarks*'                         # Chrome
+           'AppData\Local\Google\Chrome Beta\User Data\*\Bookmarks*'                    # Chrome Beta
+           'AppData\Local\Google\Chrome Dev\User Data\*\Bookmarks*'                     # Chrome Dev
+           'AppData\Local\Google\Chrome SxS\User Data\*\Bookmarks*'                     # Chrome Canary
+           'AppData\Local\Chromium\User Data\*\Bookmarks*'                              # Chromium
+           'AppData\Local\BraveSoftware\Brave-Browser\User Data\*\Bookmarks*'           # Brave
+           'AppData\Local\Vivaldi\User Data\*\Bookmarks*'                               # Vivaldi
+           'AppData\Local\Yandex\YandexBrowser\User Data\*\Bookmarks*'                  # Yandex
+           'AppData\Local\Packages\TheBrowserCompany.Arc_ttt1ap7aakyb4\LocalCache\Local\Arc\User Data\*\Bookmarks*' # Arc
+           'AppData\Local\CocCoc\Browser\User Data\*\Bookmarks*'                        # Coc Coc
+           'AppData\Local\Tencent\QQBrowser\User Data\*\Bookmarks*'                     # QQ Browser
+           'AppData\Local\UCBrowser\User Data*\*\Bookmarks*'                            # UC Browser
+           'AppData\Local\WaveBrowser\User Data\*\Bookmarks*'                           # Wave Browser
+           'AppData\Local\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Bookmarks*' # Prisma Access Browser
+           'AppData\Local\Supermium\User Data\*\Bookmarks*'                             # Supermium
+           'AppData\Local\Packages\Microsoft.MicrosoftEdge_*\AC\MicrosoftEdge\User\Default\DataStore\Data\nouser1\120712-0049\DBStore\Spartan.edb' # legacy Edge
+           'Local Settings\Application Data\Google\Chrome\User Data\*\Bookmarks*'       # XP: Chrome
+           'Local Settings\Application Data\Google\Chrome Beta\User Data\*\Bookmarks*'  # XP: Chrome Beta
+           'Local Settings\Application Data\Google\Chrome Dev\User Data\*\Bookmarks*'   # XP: Chrome Dev
+           'Local Settings\Application Data\Google\Chrome SxS\User Data\*\Bookmarks*'   # XP: Chrome Canary
+           'Local Settings\Application Data\Chromium\User Data\*\Bookmarks*'            # XP: Chromium
+           'Local Settings\Application Data\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Bookmarks*' # XP: Prisma Access
+           'Application Data\Supermium\User Data\*\Bookmarks*'                          # XP: Supermium
+       ) }
+    # Browser cookies: one pattern per browser, counted per user x browser x
+    # profile (with their journals); Firefox; IE's cookie folders; XP profile
+    # paths last.
+    @{ Name = 'Browser Cookies'; Group = 3; ExpectLocked = { <# IE's cookie index.dat, locked from boot #> $true }; CountBy = 'Folder'
+       SupportingFiles = @('*-journal', '*-wal', '*-shm')
+       User = @(
+           'AppData\Local\Google\Chrome\User Data\*\Cookies*'                           # Chrome
+           'AppData\Local\Google\Chrome Beta\User Data\*\Cookies*'                      # Chrome Beta
+           'AppData\Local\Google\Chrome Dev\User Data\*\Cookies*'                       # Chrome Dev
+           'AppData\Local\Google\Chrome SxS\User Data\*\Cookies*'                       # Chrome Canary
+           'AppData\Local\Chromium\User Data\*\Cookies*'                                # Chromium
+           'AppData\Local\BraveSoftware\Brave-Browser\User Data\*\Cookies*'             # Brave
+           'AppData\Local\Vivaldi\User Data\*\Cookies*'                                 # Vivaldi
+           'AppData\Local\Yandex\YandexBrowser\User Data\*\Cookies*'                    # Yandex
+           'AppData\Local\CocCoc\Browser\User Data\*\Cookies*'                          # Coc Coc
+           'AppData\Local\Tencent\QQBrowser\User Data\*\Cookies*'                       # QQ Browser
+           'AppData\Local\UCBrowser\User Data*\*\Cookies*'                              # UC Browser
+           'AppData\Roaming\360se6\User Data\*\Cookies*'                                # 360 Secure Browser
+           'AppData\Local\WaveBrowser\User Data\*\Cookies*'                             # Wave Browser
+           'AppData\Local\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Cookies*'  # Prisma Access Browser
+           'AppData\Local\Supermium\User Data\*\Cookies*'                               # Supermium
+           'AppData\Roaming\Mozilla\Firefox\Profiles\*\cookies.sqlite*'                 # Firefox
+           'AppData\Roaming\Microsoft\Windows\Cookies\**\*'                             # IE
+           'Local Settings\Application Data\Google\Chrome\User Data\*\Cookies*'         # XP: Chrome
+           'Local Settings\Application Data\Google\Chrome Beta\User Data\*\Cookies*'    # XP: Chrome Beta
+           'Local Settings\Application Data\Google\Chrome Dev\User Data\*\Cookies*'     # XP: Chrome Dev
+           'Local Settings\Application Data\Google\Chrome SxS\User Data\*\Cookies*'     # XP: Chrome Canary
+           'Local Settings\Application Data\Chromium\User Data\*\Cookies*'              # XP: Chromium
+           'Local Settings\Application Data\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Cookies*' # XP: Prisma Access
+           'Application Data\Supermium\User Data\*\Cookies*'                            # XP: Supermium
+           'Application Data\Mozilla\Firefox\Profiles\*\cookies.sqlite*'                # XP: Firefox
+           'Cookies\**\*'                                                               # XP: IE
+       ) }
+    # Browser extensions: Firefox's extensions.json, per user x profile.
+    @{ Name = 'Browser Extensions'; Group = 3; CountBy = 'Folder'; User = 'AppData\Roaming\Mozilla\Firefox\Profiles\*\extensions.json' }
     # Browser history: one pattern per browser (or channel), counted per user x
     # browser x profile. History DB only (plus its journal). Maintained browsers
     # first, then IE / legacy Edge (WebCache, index.dat) and other discontinued
     # browsers or formats, then XP profile paths.
-    @{ Name = 'Browser History'; Group = 3; ExpectLocked = { <# WebCache / running browsers #> $true }; CountBy = 'Folder'
+    @{ Name = 'Browser History'; Group = 3; ExpectLocked = { <# a logged-on user's WebCache #> $true }; CountBy = 'Folder'
        SupportingFiles = @('*-journal', '*-wal', '*-shm', '*Provider Cache', '*.log', '*.chk', '*.jrs', '*.jfm')
        System = @(
            'Windows\System32\config\systemprofile\AppData\Local\Google\Chrome\User Data\*\History*'
@@ -339,47 +446,144 @@ $artefacts = @(
        )
        User = @(
            'AppData\Local\Microsoft\Edge\User Data\*\History*'                                   # Edge
+           'AppData\Local\Microsoft\Edge\User Data\*\Shortcuts*'                                   # Edge
            'AppData\Local\Microsoft\Edge Beta\User Data\*\History*'                              # Edge Beta
+           'AppData\Local\Microsoft\Edge Beta\User Data\*\Shortcuts*'                              # Edge Beta
            'AppData\Local\Microsoft\Edge Dev\User Data\*\History*'                               # Edge Dev
+           'AppData\Local\Microsoft\Edge Dev\User Data\*\Shortcuts*'                               # Edge Dev
            'AppData\Local\Microsoft\Edge SxS\User Data\*\History*'                               # Edge Canary
+           'AppData\Local\Microsoft\Edge SxS\User Data\*\Shortcuts*'                               # Edge Canary
            'AppData\Local\Google\Chrome\User Data\*\History*'                                    # Chrome
+           'AppData\Local\Google\Chrome\User Data\*\Shortcuts*'                                    # Chrome
+           'AppData\Local\Google\Chrome\User Data\*\Archived History*'                                    # Chrome
            'AppData\Local\Google\Chrome Beta\User Data\*\History*'                               # Chrome Beta
+           'AppData\Local\Google\Chrome Beta\User Data\*\Shortcuts*'                               # Chrome Beta
            'AppData\Local\Google\Chrome Dev\User Data\*\History*'                                # Chrome Dev
+           'AppData\Local\Google\Chrome Dev\User Data\*\Shortcuts*'                                # Chrome Dev
            'AppData\Local\Google\Chrome SxS\User Data\*\History*'                                # Chrome Canary
+           'AppData\Local\Google\Chrome SxS\User Data\*\Shortcuts*'                                # Chrome Canary
            'AppData\Local\Chromium\User Data\*\History*'                                         # Chromium
+           'AppData\Local\Chromium\User Data\*\Shortcuts*'                                         # Chromium
            'AppData\Local\BraveSoftware\Brave-Browser\User Data\*\History*'                      # Brave
+           'AppData\Local\BraveSoftware\Brave-Browser\User Data\*\Shortcuts*'                      # Brave
            'AppData\Local\Vivaldi\User Data\*\History*'                                          # Vivaldi
            'AppData\Roaming\Opera Software\Opera Stable\History*'                                # Opera (single profile)
            'AppData\Roaming\Opera Software\Opera Stable\*\History*'                              # Opera (profiles)
            'AppData\Local\Yandex\YandexBrowser\User Data\*\History*'                             # Yandex
+           'AppData\Local\Yandex\YandexBrowser\User Data\*\Shortcuts*'                             # Yandex
            'AppData\Local\Packages\TheBrowserCompany.Arc_ttt1ap7aakyb4\LocalCache\Local\Arc\User Data\*\History*'   # Arc
+           'AppData\Local\Packages\TheBrowserCompany.Arc_ttt1ap7aakyb4\LocalCache\Local\Arc\User Data\*\Shortcuts*'   # Arc
            'AppData\Local\CocCoc\Browser\User Data\*\History*'                                   # Coc Coc
+           'AppData\Local\CocCoc\Browser\User Data\*\Shortcuts*'                                   # Coc Coc
            'AppData\Local\Tencent\QQBrowser\User Data\*\History*'                                # QQ Browser
+           'AppData\Local\Tencent\QQBrowser\User Data\*\Shortcuts*'                                # QQ Browser
+           'AppData\Local\UCBrowser\User Data*\*\History*'                                     # UC Browser
+           'AppData\Local\UCBrowser\User Data*\*\Shortcuts*'                                   # UC Browser
            'AppData\Roaming\360se6\User Data\*\360History*'                                      # 360 Secure Browser
+           'AppData\Roaming\360se6\User Data\*\Shortcuts*'                                       # 360 Secure Browser
            'AppData\Local\WaveBrowser\User Data\*\History*'                                      # Wave Browser
+           'AppData\Local\WaveBrowser\User Data\*\Shortcuts*'                                      # Wave Browser
            'AppData\Local\Palo Alto Networks\PrismaAccessBrowser\User Data\*\History*'           # Prisma Access Browser
+           'AppData\Local\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Shortcuts*'           # Prisma Access Browser
            'AppData\Local\Supermium\User Data\*\History*'                                        # Supermium
+           'AppData\Local\Supermium\User Data\*\Shortcuts*'                                        # Supermium
            'AppData\Roaming\Mozilla\Firefox\Profiles\*\places.sqlite*'                           # Firefox
            'AppData\Local\Microsoft\Windows\WebCache\*'                                          # IE 10/11, legacy Edge
            'AppData\Local\Microsoft\Windows\History\**\index.dat'                                # IE 9 and earlier
-           'AppData\Local\Microsoft\Windows\IEDownloadHistory\**\index.dat'                      # IE 9/10 downloads
+           'AppData\Roaming\Microsoft\Windows\IEDownloadHistory\index.dat'                       # IE 9 downloads
            'AppData\Roaming\Mozilla\Firefox\Profiles\*\downloads.sqlite*'                        # Firefox < 26 downloads
            'AppData\Roaming\Opera\Opera\global_history.dat'                                      # Opera <= 12
            'AppData\Roaming\Opera\Opera\typed_history.xml'                                       # Opera <= 12
            'AppData\Roaming\Apple Computer\Safari\History.plist'                                 # Safari for Windows
+           'AppData\Roaming\Apple Computer\Safari\Downloads.plist'                               # Safari for Windows
            'Local Settings\Application Data\Google\Chrome\User Data\*\History*'                  # XP: Chrome
+           'Local Settings\Application Data\Google\Chrome\User Data\*\Shortcuts*'                  # XP: Chrome
            'Local Settings\Application Data\Google\Chrome Beta\User Data\*\History*'             # XP: Chrome Beta
+           'Local Settings\Application Data\Google\Chrome Beta\User Data\*\Shortcuts*'             # XP: Chrome Beta
            'Local Settings\Application Data\Google\Chrome Dev\User Data\*\History*'              # XP: Chrome Dev
+           'Local Settings\Application Data\Google\Chrome Dev\User Data\*\Shortcuts*'              # XP: Chrome Dev
            'Local Settings\Application Data\Google\Chrome SxS\User Data\*\History*'              # XP: Chrome Canary
+           'Local Settings\Application Data\Google\Chrome SxS\User Data\*\Shortcuts*'              # XP: Chrome Canary
            'Local Settings\Application Data\Chromium\User Data\*\History*'                       # XP: Chromium
+           'Local Settings\Application Data\Chromium\User Data\*\Shortcuts*'                       # XP: Chromium
            'Local Settings\Application Data\Palo Alto Networks\PrismaAccessBrowser\User Data\*\History*'   # XP: Prisma Access
+           'Local Settings\Application Data\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Shortcuts*'   # XP: Prisma Access
            'Application Data\Supermium\User Data\*\History*'                                     # XP: Supermium
+           'Application Data\Supermium\User Data\*\Shortcuts*'                                     # XP: Supermium
            'Application Data\Mozilla\Firefox\Profiles\*\places.sqlite*'                          # XP: Firefox
            'Application Data\Mozilla\Firefox\Profiles\*\downloads.sqlite*'                       # XP: Firefox < 26 downloads
+           'Application Data\Mozilla\Firefox\Profiles\*\history.dat'                             # XP: Firefox history.dat
            'Application Data\Opera\Opera\global_history.dat'                                      # XP: Opera <= 12
            'Application Data\Opera\Opera\typed_history.xml'                                       # XP: Opera <= 12
            'Application Data\Apple Computer\Safari\History.plist'                                 # XP: Safari
            'Local Settings\History\History.IE5\**\index.dat'                                     # XP: IE
+       ) }
+    # Browser preferences: one pattern per browser (or channel), counted per user
+    # x browser x profile; Firefox's prefs.js; XP profile paths last.
+    @{ Name = 'Browser Preferences'; Group = 3; CountBy = 'Folder'
+       User = @(
+           'AppData\Local\Microsoft\Edge\User Data\*\Preferences'                       # Edge
+           'AppData\Local\Microsoft\Edge Beta\User Data\*\Preferences'                  # Edge Beta
+           'AppData\Local\Microsoft\Edge Dev\User Data\*\Preferences'                   # Edge Dev
+           'AppData\Local\Microsoft\Edge SxS\User Data\*\Preferences'                   # Edge Canary
+           'AppData\Local\Google\Chrome\User Data\*\Preferences'                        # Chrome
+           'AppData\Local\Google\Chrome Beta\User Data\*\Preferences'                   # Chrome Beta
+           'AppData\Local\Google\Chrome Dev\User Data\*\Preferences'                    # Chrome Dev
+           'AppData\Local\Google\Chrome SxS\User Data\*\Preferences'                    # Chrome Canary
+           'AppData\Local\Chromium\User Data\*\Preferences'                             # Chromium
+           'AppData\Local\BraveSoftware\Brave-Browser\User Data\*\Preferences'          # Brave
+           'AppData\Local\Vivaldi\User Data\*\Preferences'                              # Vivaldi
+           'AppData\Local\Yandex\YandexBrowser\User Data\*\Preferences'                 # Yandex
+           'AppData\Local\Packages\TheBrowserCompany.Arc_ttt1ap7aakyb4\LocalCache\Local\Arc\User Data\*\Preferences' # Arc
+           'AppData\Local\CocCoc\Browser\User Data\*\Preferences'                       # Coc Coc
+           'AppData\Local\Tencent\QQBrowser\User Data\*\Preferences'                    # QQ Browser
+           'AppData\Local\UCBrowser\User Data*\*\Preferences'                           # UC Browser
+           'AppData\Roaming\360se6\User Data\*\Preferences'                             # 360 Secure Browser
+           'AppData\Local\WaveBrowser\User Data\*\Preferences'                          # Wave Browser
+           'AppData\Local\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Preferences' # Prisma Access Browser
+           'AppData\Local\Supermium\User Data\*\Preferences'                            # Supermium
+           'AppData\Roaming\Mozilla\Firefox\Profiles\*\prefs.js'                        # Firefox
+           'Local Settings\Application Data\Google\Chrome\User Data\*\Preferences'      # XP: Chrome
+           'Local Settings\Application Data\Google\Chrome Beta\User Data\*\Preferences' # XP: Chrome Beta
+           'Local Settings\Application Data\Google\Chrome Dev\User Data\*\Preferences'  # XP: Chrome Dev
+           'Local Settings\Application Data\Google\Chrome SxS\User Data\*\Preferences'  # XP: Chrome Canary
+           'Local Settings\Application Data\Chromium\User Data\*\Preferences'           # XP: Chromium
+           'Local Settings\Application Data\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Preferences' # XP: Prisma Access
+           'Application Data\Supermium\User Data\*\Preferences'                         # XP: Supermium
+       ) }
+    # Browser sessions: each Chromium-family profile's Sessions folder (Brave's
+    # Default profile only, as the store holds it), Firefox's session store and
+    # its backups, IE's recovery and tab roaming folders; XP profile paths last.
+    # Counted per file: a profile's sessions are several files.
+    @{ Name = 'Browser Sessions'; Group = 3
+       User = @(
+           'AppData\Local\Microsoft\Edge\User Data\*\Sessions\*'                        # Edge
+           'AppData\Local\Microsoft\Edge Beta\User Data\*\Sessions\*'                   # Edge Beta
+           'AppData\Local\Microsoft\Edge Dev\User Data\*\Sessions\*'                    # Edge Dev
+           'AppData\Local\Microsoft\Edge SxS\User Data\*\Sessions\*'                    # Edge Canary
+           'AppData\Local\Google\Chrome\User Data\*\Sessions\*'                         # Chrome
+           'AppData\Local\Google\Chrome Beta\User Data\*\Sessions\*'                    # Chrome Beta
+           'AppData\Local\Google\Chrome Dev\User Data\*\Sessions\*'                     # Chrome Dev
+           'AppData\Local\Google\Chrome SxS\User Data\*\Sessions\*'                     # Chrome Canary
+           'AppData\Local\Chromium\User Data\*\Sessions\*'                              # Chromium
+           'AppData\Local\BraveSoftware\Brave-Browser\User Data\Default\Sessions\*'     # Brave
+           'AppData\Local\Vivaldi\User Data\*\Sessions\*'                               # Vivaldi
+           'AppData\Local\Yandex\YandexBrowser\User Data\*\Sessions\*'                  # Yandex
+           'AppData\Local\Packages\TheBrowserCompany.Arc_ttt1ap7aakyb4\LocalCache\Local\Arc\User Data\*\Sessions\*' # Arc
+           'AppData\Local\CocCoc\Browser\User Data\*\Sessions\*'                        # Coc Coc
+           'AppData\Local\Tencent\QQBrowser\User Data\*\Sessions\*'                     # QQ Browser
+           'AppData\Local\UCBrowser\User Data*\*\Sessions\*'                            # UC Browser
+           'AppData\Roaming\360se6\User Data\*\Sessions\*'                              # 360 Secure Browser
+           'AppData\Local\WaveBrowser\User Data\*\Sessions\*'                           # Wave Browser
+           'AppData\Local\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Sessions\*' # Prisma Access Browser
+           'AppData\Local\Supermium\User Data\*\Sessions\*'                             # Supermium
+           'AppData\Roaming\Mozilla\Firefox\Profiles\*\sessionstore*'                   # Firefox
+           'AppData\Roaming\Mozilla\Firefox\Profiles\*\sessionstore-backups\**\*'       # Firefox
+           'AppData\Local\Microsoft\Internet Explorer\Recovery\**\*'                    # IE
+           'AppData\Local\Microsoft\Internet Explorer\TabRoaming\**\*'                  # IE
+           'Application Data\Supermium\User Data\*\Sessions\*'                          # XP: Supermium
+           'Application Data\Mozilla\Firefox\Profiles\*\sessionstore*'                  # XP: Firefox
+           'Local Settings\Application Data\Microsoft\Internet Explorer\Recovery\**\*'  # XP: IE
        ) }
     # File History catalogs (Catalog1/2.edb): metadata about backed-up files, not
     # the files themselves; only present when File History is enabled.
@@ -403,17 +607,21 @@ $artefacts = @(
        ) }
     # OneDrive: settings (file lists, sync database) and client activity logs (.odl,
     # .odlgz, .odlsent, .aodl, .loggz) with the .keystore needed to decode their
-    # obfuscated strings, then the older SkyDrive and Windows 8.1
-    # built-in client locations. Not the ETW traces (.etlgz, bulk), the client's
-    # own program files or the synced files.
+    # obfuscated strings, and the sync diagnostics log, then the older SkyDrive
+    # and Windows 8.1 built-in client locations. Not the client's own program
+    # files or the synced files; its ETW traces are OneDrive ETL Traces.
+    # OneDrive's ETW traces (.etl) of Windows 8.1's built-in client.
+    @{ Name = 'OneDrive ETL Traces'; Group = 3; User = 'AppData\Local\Microsoft\Windows\SkyDrive\logs\*.etl' }
     @{ Name = 'OneDrive Metadata'; Group = 3; ExpectMissing = @(@{ When = { $hostInfo.Server }; Why = $gapReasons.Server }); User = @(
         'AppData\Local\Microsoft\OneDrive\settings\**\*'
         'AppData\Local\Microsoft\OneDrive\logs\**\*.odl*'
         'AppData\Local\Microsoft\OneDrive\logs\**\*.aodl'
         'AppData\Local\Microsoft\OneDrive\logs\**\*.loggz'
         'AppData\Local\Microsoft\OneDrive\logs\**\*.keystore'
+        'AppData\Local\Microsoft\OneDrive\logs\Personal\SyncDiagnostics.log'
         'AppData\Local\Microsoft\SkyDrive\logs\**\*'                       # SkyDrive
         'AppData\Local\Microsoft\Windows\OneDrive\logs\**\*'              # Windows 8.1
+        'AppData\Local\Microsoft\Windows\SkyDrive\logs\SyncDiagnostics.log'   # Windows 8.1
     ) }
     # PSReadLine history for every host (console, VS Code, ...), including SYSTEM's.
     @{ Name = 'PowerShell History'; Group = 3
@@ -464,6 +672,7 @@ $artefacts = @(
        User = @(
            'NTUSER.DAT'
            'AppData\Local\Microsoft\Windows\UsrClass.dat'
+           'Local Settings\Application Data\Microsoft\Windows\UsrClass.dat'   # XP
        ) }
     @{ Name = 'Startup Folders'; Group = 3
        System = 'ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp\**\*'
@@ -475,12 +684,14 @@ $artefacts = @(
         'AppData\Local\Packages\MicrosoftTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\Logs\*'
         'AppData\Roaming\Microsoft\Teams\logs.txt'                              # classic Teams
     ) }
+    # Explorer's thumbnail cache index only, not the cached thumbnails (content).
+    @{ Name = 'Thumbcache'; Group = 3; User = 'AppData\Local\Microsoft\Windows\Explorer\thumbcache_idx.db' }
     # WER: only the .wer report metadata, never the crash dumps (bulk binary content).
     @{ Name = 'WER'; Group = 3
        System = 'ProgramData\Microsoft\Windows\WER\**\*.wer'
        User   = 'AppData\Local\Microsoft\Windows\WER\**\*.wer' }
-    # Windows Timeline (Windows 10; dropped in Windows 11).
-    @{ Name = 'Windows Timeline'; Group = 3; ExpectMissing = @(@{ When = { $hostInfo.Server }; Why = $gapReasons.Server }; @{ When = { $hostInfo.Build -ge 22000 }; Why = $gapReasons.WindowsVersion }); User = 'AppData\Local\ConnectedDevicesPlatform\**\ActivitiesCache.db*' }
+    # Windows Timeline's activity database.
+    @{ Name = 'Windows Timeline'; Group = 3; User = 'AppData\Local\ConnectedDevicesPlatform\**\ActivitiesCache.db*' }
 )
 
 # The columns of collection.csv, one row per file the run attempted and one per
@@ -542,10 +753,43 @@ function ConvertTo-CsvLine {
     return ($quotedCells -join ',')
 }
 
-# A byte count in GiB for messages, e.g. '1 GiB' or '1.5 GiB'.
-function Format-GibiByte {
+# Numbers on the console and in the run log, in the console frame's formats
+# and the invariant culture, so the host's locale never changes them: counts
+# with a comma as the thousands
+# separator ('1,204'); sizes in IEC binary units with two decimals ('8.41 GiB',
+# 1 MiB = 1,048,576 bytes); bytes in full where exactness matters ('412,000,000
+# bytes'); durations as h:mm:ss ('0:11:15'). collection.csv keeps plain
+# numbers: it is data, not text to read.
+function Format-Count {
+    param([long]$Count)
+    return $Count.ToString('N0', [Globalization.CultureInfo]::InvariantCulture)
+}
+
+function Format-ByteCount {
     param([long]$Bytes)
-    return (($Bytes / 1GB).ToString('0.##', [Globalization.CultureInfo]::InvariantCulture) + ' GiB')
+    return ((Format-Count -Count $Bytes) + ' bytes')
+}
+
+# A size in the largest IEC binary unit it reaches (KiB to TiB), e.g.
+# '1.00 GiB'; under 1 KiB in bytes.
+function Format-Size {
+    param([long]$Bytes)
+    $units = @(@{ Name = 'TiB'; Bytes = 1TB }, @{ Name = 'GiB'; Bytes = 1GB }, @{ Name = 'MiB'; Bytes = 1MB }, @{ Name = 'KiB'; Bytes = 1KB })
+    foreach ($unit in $units) {
+        if ($Bytes -ge $unit.Bytes) { return (($Bytes / $unit.Bytes).ToString('N2', [Globalization.CultureInfo]::InvariantCulture) + ' ' + $unit.Name) }
+    }
+    return (Format-ByteCount -Bytes $Bytes)
+}
+
+# A size in mebibytes, e.g. '185.64' (the total line's own unit, MiB).
+function Format-Mebibyte {
+    param([long]$Bytes)
+    return (($Bytes / 1MB).ToString('N2', [Globalization.CultureInfo]::InvariantCulture))
+}
+
+function Format-Duration {
+    param([timespan]$Duration)
+    return [string]::Format([Globalization.CultureInfo]::InvariantCulture, '{0}:{1:D2}:{2:D2}', [long][math]::Floor($Duration.TotalHours), $Duration.Minutes, $Duration.Seconds)
 }
 
 # A file time for the per-file record: ISO 8601 in UTC with a trailing Z and
@@ -880,6 +1124,9 @@ function Get-HostInfo {
             if ($info.Build -ge 22000) { $info.Caption = $info.Caption -replace 'Windows 10', 'Windows 11' }
         }
     } catch {}   # no registry: the CIM facts stand
+    # A build or name read as 0 or empty (a missing value) is not known.
+    if (-not $info.Build)   { $info.Build   = $null }
+    if (-not $info.Caption) { $info.Caption = $null }
     return $info
 }
 
@@ -1257,8 +1504,8 @@ function Format-SummaryStatus {
     param([int]$Candidates, [int]$Collected, [int]$Failed)
     if     ($Candidates -eq 0) { return 'Missing' }
     elseif ($Collected -eq 0)  { return 'Not accessible' }
-    elseif ($Failed -gt 0)     { return "$Collected collected, $Failed not accessible" }
-    else                       { return "$Collected collected" }
+    elseif ($Failed -gt 0)     { return "$(Format-Count -Count $Collected) collected, $(Format-Count -Count $Failed) not accessible" }
+    else                       { return "$(Format-Count -Count $Collected) collected" }
 }
 
 # The places one artefact row is searched: @{ Root; Scope; Pattern } for each
@@ -1397,7 +1644,9 @@ function Add-ArtefactToZip {
                         if ($isSupportingFile) {
                             $countByFolderUnits[$unitPath].Any = $countByFolderUnits[$unitPath].Any -or $wasRead
                         } else {
-                            $countByFolderUnits[$unitPath].Main = ($countByFolderUnits[$unitPath].Main -eq $true) -or $wasRead
+                            # Every main file must be read: a profile whose History failed
+                            # isn't collected because its Shortcuts or Bookmarks.bak was.
+                            $countByFolderUnits[$unitPath].Main = ($countByFolderUnits[$unitPath].Main -ne $false) -and $wasRead
                         }
                     } else {
                         $tally.Candidates++
@@ -1413,8 +1662,8 @@ function Add-ArtefactToZip {
     }
 
     if ($Artefact.CountBy -eq 'Folder') {
-        # Collected if the main file was read; supporting files only decide when a
-        # unit has no main file at all (e.g. a lone journal).
+        # Collected if every main file was read; supporting files only decide when
+        # a unit has no main file at all (e.g. a lone journal).
         $tally.Candidates = $countByFolderUnits.Count
         $tally.Collected  = @($countByFolderUnits.Values | Where-Object { $_.Main -eq $true -or ($null -eq $_.Main -and $_.Any) }).Count
         $tally.Failed     = $tally.Candidates - $tally.Collected
@@ -1546,7 +1795,7 @@ function Get-NoRoomReason {
     $freeSpace = $null
     try { $freeSpace = $OutputDrive.AvailableFreeSpace } catch { return '' }
     if ($freeSpace - $Bytes -ge $freeSpaceReserve) { return '' }
-    return ('{0} has {1} free, less than {2} above the reserve ({3})' -f $OutputDrive.Name.TrimEnd('\'), (Format-GibiByte -Bytes $freeSpace), (Format-GibiByte -Bytes $Bytes), (Format-GibiByte -Bytes $freeSpaceReserve))
+    return ('{0} has {1} free, less than {2} above the reserve ({3})' -f $OutputDrive.Name.TrimEnd('\'), (Format-Size -Bytes $freeSpace), (Format-Size -Bytes $Bytes), (Format-Size -Bytes $freeSpaceReserve))
 }
 
 # Write the zip's bytes from VolumeStart to its current end into a new volume
@@ -1571,7 +1820,7 @@ function Write-ZipVolume {
         $expectedLength = $ZipStream.Length - $VolumeStart
         $lengthOnDisk   = ([System.IO.FileInfo]::new($VolumePath)).Length
         if ($lengthOnDisk -ne $expectedLength) {
-            $result.Error = '{0} is {1} bytes on disk, not {2}' -f (Split-Path -Path $VolumePath -Leaf), $lengthOnDisk, $expectedLength
+            $result.Error = '{0} is {1} on disk, not {2}' -f (Split-Path -Path $VolumePath -Leaf), (Format-ByteCount -Bytes $lengthOnDisk), (Format-ByteCount -Bytes $expectedLength)
         }
     } catch {
         $result.Error = Get-SplitErrorText -ErrorRecord $_ -DriveName $DriveName
@@ -1642,7 +1891,7 @@ function Undo-ZipSplit {
                 continue
             }
             if ($volume.Start -ne $zipStream.Length) {
-                return ('the zip ends at {0} bytes, but {1} starts at {2}' -f $zipStream.Length, (Split-Path -Path $volume.Path -Leaf), $volume.Start)
+                return ('the zip ends at {0}, but {1} starts at {2}' -f (Format-ByteCount -Bytes $zipStream.Length), (Split-Path -Path $volume.Path -Leaf), (Format-ByteCount -Bytes $volume.Start))
             }
             $volumeLength = ([System.IO.FileInfo]::new($volume.Path)).Length
             $noRoomReason = Get-NoRoomReason -OutputDrive $OutputDrive -Bytes $volumeLength
@@ -1659,7 +1908,7 @@ function Undo-ZipSplit {
             try { Remove-Item -LiteralPath $volume.Path -Force -ErrorAction Stop } catch {}   # back in the zip; reported by the caller
         }
         if ($zipStream.Length -ne $OriginalLength) {
-            return ('the zip is {0} bytes, not its original {1}' -f $zipStream.Length, $OriginalLength)
+            return ('the zip is {0}, not its original {1}' -f (Format-ByteCount -Bytes $zipStream.Length), (Format-ByteCount -Bytes $OriginalLength))
         }
         # Closing the zip writes what is still buffered: part of the undo.
         $zipStream.Dispose()
@@ -1770,7 +2019,7 @@ function Test-ZipReadBack {
     try {
         $zipReader = [System.IO.Compression.ZipFile]::OpenRead($Path)
         $entries   = $zipReader.Entries
-        if ($entries.Count -ne $ExpectedEntryCount) { return ('{0} entries where {1} were written' -f $entries.Count, $ExpectedEntryCount) }
+        if ($entries.Count -ne $ExpectedEntryCount) { return ('{0} entries where {1} were written' -f (Format-Count -Count $entries.Count), (Format-Count -Count $ExpectedEntryCount)) }
         if ($LastEntryName -and $entries[$entries.Count - 1].FullName -ne $LastEntryName) { return "the last entry is not $LastEntryName" }
         return ''
     } catch {
@@ -1859,11 +2108,14 @@ function Add-CollectorWarning {
 }
 
 # Print the Warnings section: one line per warning, its detail lines indented
-# under it, or "Warnings: none" when -ShowNone.
+# under it, or "none" under the title when -ShowNone.
 function Write-WarningSection {
     param([switch]$ShowNone)
     if ($script:warnings.Count -eq 0) {
-        if ($ShowNone) { Write-ConsoleAndLog -Text 'Warnings: none' }
+        if ($ShowNone) {
+            Write-ConsoleAndLog -Text 'Warnings:'
+            Write-ConsoleAndLog -Text '  none'
+        }
         return
     }
     Write-ConsoleAndLog -Text 'Warnings:'
@@ -1885,7 +2137,7 @@ function Get-StopMessage {
     param([string]$StoppedWhile, [string]$Reason, [string]$Detail, [string]$DriveName, [string]$ZipFate)
     switch ($Reason) {
         'Full'         { return "Collection stopped while ${StoppedWhile}: $DriveName is full. The partial zip $ZipFate. Free up space on $DriveName and run the collector again." }
-        'BelowReserve' { return "Collection stopped while ${StoppedWhile}: $DriveName has less than $(Format-GibiByte -Bytes $freeSpaceReserve) free, the reserve kept for the host. The zip holds only what was collected until then (the artefacts after it: Not collected) and is not offered for getfile. It is kept here:" }
+        'BelowReserve' { return "Collection stopped while ${StoppedWhile}: $DriveName has less than $(Format-Size -Bytes $freeSpaceReserve) free, the reserve kept for the host. The zip holds only what was collected until then (the artefacts after it: Not collected) and is not offered for getfile. It is kept here:" }
         'NotFinished'  { return "Collection stopped while ${StoppedWhile}: the zip could not be finished ($Detail). The zip $ZipFate. Run the collector again." }
         'SplitFailed'  { return "The zip could not be split into volumes, nor the split undone ($Detail). The zip and its volumes $ZipFate. Run the collector again." }
         default        { return "Collection stopped while ${StoppedWhile}: the finished zip could not be read back ($Detail). The zip $ZipFate. Run the collector again." }
@@ -1902,10 +2154,41 @@ function Write-StoppedRunEnd {
     Write-FinishedLine
 }
 
-# The run's last line: when it ended, in UTC, in the banner's form.
+# The OS field's text: the OS name and release, or, when the name couldn't be
+# read, 'not determined', with the build where that is known.
+function Get-OsFieldText {
+    param($HostInfo)
+    if ($HostInfo.Caption) { return (@($HostInfo.Caption, $HostInfo.Version | Where-Object { $_ }) -join ' ') }
+    if ($HostInfo.Build)   { return ('not determined (build {0})' -f $HostInfo.Build) }
+    return 'not determined'
+}
+
+# The header fields of the console's opening (the console frame's remote pane
+# form), as 'Label : value' with the labels padded to one width: when the run
+# started (UTC), the host, the OS, the run log and the drives searched. The OS
+# field is always there (Get-OsFieldText: 'not determined' when its name
+# couldn't be read, with a warning); the log is left out when none was
+# created (a warning says so too).
+function Write-RunHeader {
+    param([string]$OsText, [string]$LogPath, [string]$DrivesText)
+    $fields = [ordered]@{}
+    $fields['Started'] = $runStart.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture)
+    $fields['Host']    = $hostName
+    $fields['OS']      = $OsText
+    if ($LogPath) { $fields['Log'] = $LogPath }
+    $fields['Drives']  = $DrivesText
+    $labelWidth = ($fields.Keys | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+    foreach ($label in $fields.Keys) {
+        Write-ConsoleAndLog -Text ('{0} : {1}' -f $label.PadRight($labelWidth), $fields[$label])
+    }
+}
+
+# The run's last line: when it ended, in UTC as the Started field, and how
+# long the run took from $runStart.
 function Write-FinishedLine {
+    $runEnd = (Get-Date).ToUniversalTime()
     Write-ConsoleAndLog -Text ''
-    Write-ConsoleAndLog -Text ('Finished ' + (Get-Date).ToUniversalTime().ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"))
+    Write-ConsoleAndLog -Text ('Finished {0}, after {1}' -f $runEnd.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", [Globalization.CultureInfo]::InvariantCulture), (Format-Duration -Duration ($runEnd - $runStart)))
 }
 
 # --- The report ---
@@ -1938,8 +2221,8 @@ function Write-GapList {
         Write-ConsoleAndLog -Text ''
         Write-ConsoleAndLog -Text 'Copies whose size differs from the source when it was opened:'
         foreach ($difference in $SizeDifferences) {
-            $openedText = if ($null -ne $difference.SizeWhenOpened) { "$($difference.SizeWhenOpened) bytes when opened" } else { 'size when opened unknown' }
-            $line = "  {0}: {1} bytes copied, {2}" -f $difference.Path, $difference.BytesCopied, $openedText
+            $openedText = if ($null -ne $difference.SizeWhenOpened) { "$(Format-ByteCount -Bytes $difference.SizeWhenOpened) when opened" } else { 'size when opened unknown' }
+            $line = "  {0}: {1} copied, {2}" -f $difference.Path, (Format-ByteCount -Bytes $difference.BytesCopied), $openedText
             if ($difference.ReadError)   { $line += "; read failed, the zip entry is incomplete ($($difference.ReadError))" }
             if ($difference.CopyStopped) { $line += '; the run stopped during the copy, the zip entry is incomplete' }
             Write-ConsoleAndLog -Text $line
@@ -1975,8 +2258,9 @@ function Write-RetrievalCommand {
 # the Defender sensor may retrieve directly (locked files usually; not files
 # whose content isn't on the disk, which aren't listed) - outcome-based: only reads that
 # actually failed, in collection order (so metafiles first). Metafiles are
-# listed only if flagged GetFile, with no Test-Path (PowerShell can't reliably
-# see them); other files must still exist. Kept lean: each row's FollowUp scope
+# listed only if flagged GetFile; a GetFile row's files are listed with no
+# Test-Path (PowerShell can't reliably see or test them); other files must
+# still exist. Kept lean: each row's FollowUp scope
 # only (machine-wide by default; for user hives, the users' own, not the
 # built-in service accounts'), and no registry transaction logs (inferred from
 # the hive). Other locked files, ESE logs included, are listed.
@@ -1984,10 +2268,11 @@ function Write-FollowUpCommand {
     param($UnreadableFiles)
     $followUpPaths = New-Object 'System.Collections.Generic.List[string]'
     foreach ($file in $UnreadableFiles) {
-        if ($file.Literal) {
-            if ($file.GetFile) { $followUpPaths.Add($file.Path) }
+        if ($file.GetFile) {
+            $followUpPaths.Add($file.Path)
             continue
         }
+        if ($file.Literal)                  { continue }
         if ($file.Scope -ne $file.FollowUp) { continue }
         if ($file.IsTransactionLog)         { continue }
         if (Test-Path -LiteralPath $file.Path -ErrorAction SilentlyContinue) { $followUpPaths.Add($file.Path) }
@@ -2014,16 +2299,15 @@ $script:copyBuffer    = New-Object byte[] (1MB)                               # 
 $script:localDrives   = @()                                                   # Get-LocalDrive's result, read by Get-DriveRoot
 $script:logWriteFailed = $false                                               # the console has said the run log can't be written
 
-# Banner first, before any status, so the version is the first thing printed.
-# The blank line above it is console-only, to set it off from Live Response's
-# transcript line; the run log starts with the banner.
+# The name and version first, before any status, so they are the first thing
+# printed. The blank line above it is console-only, to set it off from Live
+# Response's transcript line; the run log starts with the name. The header
+# fields follow once the run log exists, so it can name the log (Write-RunHeader).
 Write-Output ''
-Write-ConsoleAndLog -Text "Live Response collector v$CollectorVersion"
+Write-ConsoleAndLog -Text "latro $CollectorVersion"
 Write-ConsoleAndLog -Text ''
-Write-ConsoleAndLog -Text ("Host {0}, started {1}" -f $hostName, $runStart.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"))
 $hostInfo = Get-HostInfo
-$osName   = @($hostInfo.Caption, $hostInfo.Version | Where-Object { $_ }) -join ' '
-if ($osName) { Write-ConsoleAndLog -Text "OS $osName" }
+$osText   = Get-OsFieldText -HostInfo $hostInfo
 
 # Fix the run order once: group, then name ignoring non-alphanumerics.
 # Collection, progress numbering and the summary all follow it.
@@ -2031,19 +2315,24 @@ $artefacts = @($artefacts | Sort-Object -Property { $_.Group }, { $_.Name -repla
 
 # The drives searched, so a skipped drive can't pass for one with nothing on it.
 $script:localDrives = Get-LocalDrive
-Write-ConsoleAndLog -Text ('Drives ' + (@($script:localDrives | ForEach-Object { '{0} ({1})' -f $_.Root, $_.Format }) -join ', '))
+$drivesText = (@($script:localDrives | ForEach-Object { '{0} ({1})' -f $_.Root, $_.Format }) -join ', ')
 
 try {
     Add-Type -AssemblyName System.IO.Compression -ErrorAction Stop
     Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop
 } catch {
-    Write-ConsoleAndLog -Text ('The zip library could not be loaded: ' + (Get-OneLineMessage -ErrorRecord $_))
+    $zipLibraryError = Get-OneLineMessage -ErrorRecord $_
+    Write-RunHeader -OsText $osText -LogPath '' -DrivesText $drivesText
+    Write-ConsoleAndLog -Text ''
+    Write-ConsoleAndLog -Text ('The zip library could not be loaded: ' + $zipLibraryError)
     Write-FinishedLine
     return
 }
 
 $output = Open-OutputZip -CandidateFolders $outputFolders -ZipName $zipName
 if (-not $output) {
+    Write-RunHeader -OsText $osText -LogPath '' -DrivesText $drivesText
+    Write-ConsoleAndLog -Text ''
     Write-ConsoleAndLog -Text ('Could not create the output zip in: ' + ($outputFolders -join '; '))
     Write-FinishedLine
     return
@@ -2051,6 +2340,7 @@ if (-not $output) {
 $zip     = $output.Zip
 $zipPath = $output.ZipPath
 $logPath = Start-RunLog -ZipPath $zipPath
+Write-RunHeader -OsText $osText -LogPath $logPath -DrivesText $drivesText
 
 # The output folder's drive, for the free-space reserve. If its free space
 # can't be read, the reserve can't be kept: said up front.
@@ -2063,7 +2353,8 @@ try {
     $outputDrive = $null
 }
 
-# Warnings known before collection starts, printed now so they're seen up front.
+# Warnings known before collection starts, printed now so they're seen up
+# front; the section reads "none" when there are none yet.
 try {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     if (-not $identity.IsSystem) {
@@ -2074,6 +2365,8 @@ try {
 }
 if ($null -eq $hostInfo.Build -or $null -eq $hostInfo.Server) {
     Add-CollectorWarning -Message "Host details could not be fully determined: summary notes and missing-artefact warnings may be incomplete."
+} elseif (-not $hostInfo.Caption) {
+    Add-CollectorWarning -Message 'The OS name could not be determined; the build and the host type, which the summary notes use, could.'
 }
 if ($output.Folder -ne $outputFolders[0]) {
     Add-CollectorWarning -Message "Output written to a fallback folder ($($output.Folder)), not the Defender sensor's Temp\Collections."
@@ -2082,12 +2375,10 @@ if (-not $logPath) {
     Add-CollectorWarning -Message 'The run log could not be created beside the zip: this console is the only record of the run.'
 }
 if (-not $outputDrive) {
-    Add-CollectorWarning -Message "The free space on $outputDriveName could not be read: the $(Format-GibiByte -Bytes $freeSpaceReserve) reserve is not kept."
+    Add-CollectorWarning -Message "The free space on $outputDriveName could not be read: the $(Format-Size -Bytes $freeSpaceReserve) reserve is not kept."
 }
-if ($script:warnings.Count -gt 0) {
-    Write-ConsoleAndLog -Text ''
-    Write-WarningSection
-}
+Write-ConsoleAndLog -Text ''
+Write-WarningSection -ShowNone
 Write-ConsoleAndLog -Text ''
 
 # Collect every artefact, one progress line each, then write the per-file
@@ -2117,7 +2408,7 @@ try {
     $progressIndex    = 0
     foreach ($artefact in $artefacts) {
         $progressIndex++
-        Write-ConsoleAndLog -Text ("[{0:D2}/{1}] Collecting {2}" -f $progressIndex, $artefacts.Count, $artefact.Name)
+        Write-ConsoleAndLog -Text ("[{0}/{1}] Collecting {2}" -f $progressIndex.ToString().PadLeft($artefacts.Count.ToString().Length, '0'), $artefacts.Count, $artefact.Name)
         $rowResult = $null
         try {
             $rowResult = Add-ArtefactToZip -Zip $zip -Artefact $artefact -UserProfilePaths $userProfilePaths -OutputDrive $outputDrive
@@ -2233,7 +2524,7 @@ foreach ($outputFile in $outputFiles) {
     try {
         $outputSize = (Get-Item -LiteralPath $outputFile -Force -ErrorAction Stop).Length
         if ($outputSize -gt 3GB) {
-            Add-CollectorWarning -Message ("{0} is {1} GB, over getfile's 3 GB per-file limit." -f (Split-Path -Path $outputFile -Leaf), [math]::Round($outputSize / 1GB, 2))
+            Add-CollectorWarning -Message ("{0} is {1}, over getfile's per-file limit (3 GB in Microsoft's documentation)." -f (Split-Path -Path $outputFile -Leaf), (Format-Size -Bytes $outputSize))
         }
     } catch { continue }   # a size that can't be read: the hash step below reports the file
 }
@@ -2268,14 +2559,14 @@ $sizeDifferences  = @($rowResults | ForEach-Object { $_.SizeDifferences })
 $partialCopyCount = @($sizeDifferences | Where-Object { $_.ReadError }).Count
 $collectedCount   = [int]($rowResults | Measure-Object -Property CollectedFileCount -Sum).Sum
 if ($foldersNotListed.Count -gt 0) {
-    Add-CollectorWarning -Message ("{0} folder(s) could not be listed; what they hold is counted as not accessible (named under 'Folders not listed')." -f $foldersNotListed.Count)
+    Add-CollectorWarning -Message ("{0} folder(s) could not be listed; what they hold is counted as not accessible (named under 'Folders not listed')." -f (Format-Count -Count $foldersNotListed.Count))
 }
 if ($partialCopyCount -gt 0) {
-    Add-CollectorWarning -Message ("{0} copy(ies) failed part-way and are incomplete in the zip (named under 'Copies whose size differs')." -f $partialCopyCount)
+    Add-CollectorWarning -Message ("{0} copy(ies) failed part-way and are incomplete in the zip (named under 'Copies whose size differs')." -f (Format-Count -Count $partialCopyCount))
 }
 $notLocalCount = [int]($rowResults | Measure-Object -Property NotLocalFileCount -Sum).Sum
 if ($notLocalCount -gt 0) {
-    Add-CollectorWarning -Message ("{0} file(s) whose content isn't on the disk (cloud-only or offline) were not read, so nothing was downloaded (Outcome 'not local' in $fileRecordName)." -f $notLocalCount)
+    Add-CollectorWarning -Message ("{0} file(s) whose content isn't on the disk (cloud-only or offline) were not read, so nothing was downloaded (Outcome 'not local' in $fileRecordName)." -f (Format-Count -Count $notLocalCount))
 }
 # Profiles the registry knows of outside the folders searched for profiles.
 $profilesOutside = Get-ProfileOutsideSearchedRoot -UserProfilePaths $userProfilePaths
@@ -2296,13 +2587,13 @@ Write-WarningSection -ShowNone
 Write-ArtefactSummary -RowResults $rowResults
 Write-GapList -FoldersNotListed $foldersNotListed -SizeDifferences $sizeDifferences
 
-$zipSizeText = if ($null -ne $zipBytes) { " ($([math]::Round($zipBytes / 1MB, 2)) MB compressed)" } else { '' }
+$zipSizeText = if ($null -ne $zipBytes) { " ($(Format-Mebibyte -Bytes $zipBytes) MiB compressed)" } else { '' }
 Write-ConsoleAndLog -Text ''
 if ($isPartialCollection) {
-    Write-ConsoleAndLog -Text "Collected $collectedCount files before the run stopped$zipSizeText"
+    Write-ConsoleAndLog -Text "Collected $(Format-Count -Count $collectedCount) files before the run stopped$zipSizeText"
 } else {
     # getfile lines only for a complete output: the whole zip or every volume.
-    Write-ConsoleAndLog -Text "Collected $collectedCount files total$zipSizeText"
+    Write-ConsoleAndLog -Text "Collected $(Format-Count -Count $collectedCount) files total$zipSizeText"
     Write-RetrievalCommand -OutputFiles $outputFiles -OutputHashes $outputHashes -LogPath $logPath
     Write-FollowUpCommand -UnreadableFiles @($rowResults | ForEach-Object { $_.UnreadableFiles })
 }
