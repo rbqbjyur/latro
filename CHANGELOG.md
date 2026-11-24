@@ -4,6 +4,26 @@ Notable changes to `collector.ps1`. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 2.4.1 - 2026-11-24
+
+### Changed
+- A missing artefact is warned about where the knowledge base answers
+  that it is there by default on the host's Windows release, including
+  releases it carries a default to from earlier evidence. The project no
+  longer reads the knowledge base's statements itself. A default the
+  knowledge base states only under a condition (Defender Logs on Windows
+  Vista and 7: the Windows Defender application installed) is not warned
+  about: the collector checks no such condition.
+- Warned about when missing, where they were not before: Group Policy on
+  clients from Windows Vista; Recycle Bin on clients from Windows 11
+  24H2; MSRT Log on Windows 10 22H2; Restore Point Logs on Windows XP.
+- No longer warned about when missing: BITS; Windows Timeline; INF files
+  on clients before Windows 10 1709 and servers before Windows Server
+  2016; Defender Logs on Windows Vista and Windows 7; Application
+  Compatibility on Windows 7; LNK on Windows Vista. The NTFS metafile
+  rows, which read *Missing* only when no NTFS drive is found, are no
+  longer warned about.
+
 ## 2.4.0 - 2026-11-24
 
 ### Added

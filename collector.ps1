@@ -1,4 +1,5 @@
 # SPDX-License-Identifier: 0BSD
+# Copyright (C) 2026 by outis
 #Requires -Version 5.1
 
 <#
@@ -61,7 +62,7 @@ param()
 
 # ============================== CONFIG ==============================
 
-$CollectorVersion = '2.4.0'
+$CollectorVersion = '2.4.1'
 
 # No script-wide error suppression: every unit of work has its own try/catch,
 # so an error nobody anticipated shows (in the Live Response transcript) rather
@@ -207,17 +208,17 @@ $artefacts = @(
     # 1. Drive root: the timeline-relevant NTFS metafiles (the "NTFS Triforce").
     # A metafile that isn't there (e.g. no USN journal: "Could not find file")
     # is not access denied, so it isn't explained away.
-    @{ Name = '$LogFile';    Group = 1; PresentByDefault = @(@{ Lineage = 'client' } <# every client release #>, @{ Lineage = 'server' } <# every server release #>); Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; System = '$LogFile' }   # no getfile route (reported as empty)
-    @{ Name = '$MFT';        Group = 1; PresentByDefault = @(@{ Lineage = 'client' } <# every client release #>, @{ Lineage = 'server' } <# every server release #>); Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; GetFile = $true; System = '$MFT' }
-    @{ Name = '$MFTMirr';    Group = 1; PresentByDefault = @(@{ Lineage = 'client' } <# every client release #>, @{ Lineage = 'server'; From = '5.2' } <# Windows Server 2003 on #>); Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; System = '$MFTMirr' }   # no getfile line: $MFT's is the one printed
-    @{ Name = '$UsnJrnl:$J'; Group = 1; PresentByDefault = @(@{ Lineage = 'client'; From = '6.1' } <# Windows 7 on #>); Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; System = '$Extend\$UsnJrnl:$J' }   # no getfile route
+    @{ Name = '$LogFile';    Group = 1; Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; System = '$LogFile' }   # no getfile route (reported as empty)
+    @{ Name = '$MFT';        Group = 1; Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; GetFile = $true; System = '$MFT' }
+    @{ Name = '$MFTMirr';    Group = 1; Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; System = '$MFTMirr' }   # no getfile line: $MFT's is the one printed
+    @{ Name = '$UsnJrnl:$J'; Group = 1; Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; System = '$Extend\$UsnJrnl:$J' }   # no getfile route
 
     # 2. Other system files.
     # Application compatibility / program execution records: Amcache.hve and the
     # Program Compatibility Assistant files (Windows 11 22H2+), then their
     # predecessors - RecentFileCache.bcf (Windows 7) and Syscache.hve (Windows 7 /
     # Server 2008 R2), both replaced by Amcache.hve in Windows 8 - then Windows.old.
-    @{ Name = 'Application Compatibility'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '6.1' } <# Windows 7 on #>, @{ Lineage = 'server'; From = '6.1' } <# Windows Server 2008 R2 on #>); TransactionLogs = @('*.hve', 'RecentFileCache.bcf')
+    @{ Name = 'Application Compatibility'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '6.2' } <# Windows 8 on #>, @{ Lineage = 'server'; From = '6.1' } <# Windows Server 2008 R2 on #>); TransactionLogs = @('*.hve', 'RecentFileCache.bcf')
        ExpectLocked = { <# Syscache.hve is a loaded hive before Windows 8 #> $hostInfo.Build -and $hostInfo.Build -lt 9200 }
        System = @(
            'Windows\AppCompat\Programs\Amcache.hve'
@@ -229,10 +230,10 @@ $artefacts = @(
            'Windows.old\Windows\AppCompat\Programs\RecentFileCache.bcf'
        ) }
     # BITS job database (qmgr.db) and its ESE logs: downloads and persistence.
-    @{ Name = 'BITS';          Group = 2; PresentByDefault = @(@{ Lineage = 'client' } <# every client release #>, @{ Lineage = 'server' } <# every server release #>); ExpectLocked = { <# qmgr.db, held by the BITS service while it runs #> $true }; System = 'ProgramData\Microsoft\Network\Downloader\**\*' }
+    @{ Name = 'BITS';          Group = 2; ExpectLocked = { <# qmgr.db, held by the BITS service while it runs #> $true }; System = 'ProgramData\Microsoft\Network\Downloader\**\*' }
     # Defender text logs (MPLog etc.) and detection history; not the quarantine
     # (file content). Defender event logs are covered by Event Logs.
-    @{ Name = 'Defender Logs'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '6.0' } <# Windows Vista on #>, @{ Lineage = 'server'; From = '10.0.14393' } <# Windows Server 2016 on #>); System = @(
+    @{ Name = 'Defender Logs'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '6.2' } <# Windows 8 on #>, @{ Lineage = 'server'; From = '10.0.14393' } <# Windows Server 2016 on #>); System = @(
         'ProgramData\Microsoft\Windows Defender\Support\**\*'
         'ProgramData\Microsoft\Windows Defender\Scans\History\Service\DetectionHistory\**\*'
         'ProgramData\Microsoft\Windows Defender\Scans\History\Service\Detections.log'
@@ -265,7 +266,7 @@ $artefacts = @(
     # Group Policy: local policy and scripts, and the cached copies of domain GPOs
     # (incl. Group Policy Preferences XML such as ScheduledTasks.xml) - persistence
     # and deployment evidence.
-    @{ Name = 'Group Policy'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '5.0'; Before = '6.0' } <# Windows 2000 Professional to before Windows Vista #>, @{ Lineage = 'server'; From = '5.0' } <# Windows 2000 Server on #>)
+    @{ Name = 'Group Policy'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '5.0' } <# Windows 2000 Professional on #>, @{ Lineage = 'server'; From = '5.0' } <# Windows 2000 Server on #>)
        System = @(
            'Windows\System32\GroupPolicy\**\*'
            'ProgramData\Microsoft\Group Policy\History\**\*'
@@ -283,9 +284,9 @@ $artefacts = @(
         'Windows.old\Windows\System32\LogFiles\W3SVC*\*.log'
     ) }
     # INF files: the setup information files of drivers and components installed.
-    @{ Name = 'INF files'; Group = 2; PresentByDefault = @(@{ Lineage = 'client' } <# every client release #>, @{ Lineage = 'server' } <# every server release #>); System = 'Windows\INF\*.inf' }
+    @{ Name = 'INF files'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '10.0.16299' } <# Windows 10 1709 on #>, @{ Lineage = 'server'; From = '10.0.14393' } <# Windows Server 2016 on #>); System = 'Windows\INF\*.inf' }
     # The Malicious Software Removal Tool's log.
-    @{ Name = 'MSRT Log'; Group = 2; System = 'Windows\debug\mrt.log' }
+    @{ Name = 'MSRT Log'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '10.0.19045'; Before = '10.0.22000' } <# Windows 10 22H2 to before Windows 11 21H2 #>); System = 'Windows\debug\mrt.log' }
     # Active Directory's database on a domain controller, held open while it runs.
     @{ Name = 'NTDS'; Group = 2; ExpectLocked = { <# ntds.dit, opened exclusively while the domain controller runs #> $hostInfo.DomainController }; System = 'Windows\NTDS\ntds.dit' }
     @{ Name = 'Prefetch'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '6.2' } <# Windows 8 on #>); System = @(
@@ -320,7 +321,7 @@ $artefacts = @(
         'Windows.old\Windows\System32\config\RegBack\SYSTEM1'
     ) }
     # XP restore-point logs (rp.log: each restore point's creation time and description).
-    @{ Name = 'Restore Point Logs'; Group = 2; System = 'System Volume Information\_restore*\RP*\rp.log' }
+    @{ Name = 'Restore Point Logs'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '5.1'; Before = '6.0' } <# Windows XP to before Windows Vista #>); System = 'System Volume Information\_restore*\RP*\rp.log' }
     # Configuration Manager (SCCM) client logs; only on ConfigMgr-managed hosts.
     @{ Name = 'SCCM Client Logs';   Group = 2; System = 'Windows\CCM\Logs\*' }
     # XML task definitions, plus PowerShell scheduled jobs (definitions and output).
@@ -363,7 +364,7 @@ $artefacts = @(
     # Windows Search's index: the ESE database Windows.edb with its logs and
     # checkpoint, and the SQLite databases Windows.db and Windows-gather.db with
     # their WALs, counted as one unit with the databases as its main files.
-    @{ Name = 'Windows Search index'; Group = 2; CountBy = 'Folder'; SupportingFiles = @('edb.chk', 'edb*.log', 'edbres*.jrs', '*-wal'); PresentByDefault = @(@{ Lineage = 'client'; From = '6.0' } <# Windows Vista on #>); System = @(
+    @{ Name = 'Windows Search index'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '6.0' } <# Windows Vista on #>); CountBy = 'Folder'; SupportingFiles = @('edb.chk', 'edb*.log', 'edbres*.jrs', '*-wal'); System = @(
            'ProgramData\Microsoft\Search\Data\Applications\Windows\Windows.edb'
            'ProgramData\Microsoft\Search\Data\Applications\Windows\edb.chk'
            'ProgramData\Microsoft\Search\Data\Applications\Windows\edb*.log'
@@ -800,7 +801,7 @@ $artefacts = @(
         'AppData\Roaming\Microsoft\Windows\Recent\CustomDestinations\*.customDestinations-ms'
     ) }
     # Shortcuts: recent files, Office recent, desktop and Start Menu (top level only).
-    @{ Name = 'LNK'; Group = 3; PresentByDefault = @(@{ Lineage = 'client'; From = '5.1' } <# Windows XP on #>)
+    @{ Name = 'LNK'; Group = 3; PresentByDefault = @(@{ Lineage = 'client'; From = '5.1'; Before = '6.0' } <# Windows XP to before Windows Vista #>, @{ Lineage = 'client'; From = '6.1' } <# Windows 7 on #>)
        System = @(
            'ProgramData\Microsoft\Windows\Start Menu\Programs\*.lnk'
            'System Volume Information\_restore*\RP*\*.lnk'               # XP restore points
@@ -858,7 +859,7 @@ $artefacts = @(
            @{ Key = 'HKLM:\SOFTWARE\Policies\Microsoft\PowerShellCore\Transcription';     Value = 'OutputDirectory'; Pattern = '**\PowerShell_transcript.*.txt' }
        ) }
     # Recycle Bin metadata only ($I records; INFO2 on XP), no deleted-file content.
-    @{ Name = 'Recycle Bin'; Group = 3; PresentByDefault = @(@{ Lineage = 'client'; From = '5.0'; Before = '10.0.26100' } <# Windows 2000 Professional to before Windows 11 24H2 #>, @{ Lineage = 'server'; From = '5.0' } <# Windows 2000 Server on #>); Drives = 'All'; System = @(
+    @{ Name = 'Recycle Bin'; Group = 3; PresentByDefault = @(@{ Lineage = 'client'; From = '5.0' } <# Windows 2000 Professional on #>, @{ Lineage = 'server'; From = '5.0' } <# Windows 2000 Server on #>); Drives = 'All'; System = @(
         '$Recycle.Bin\*\$I*'
         '$Recycle.Bin\$I*'                                               # FAT/exFAT: no per-SID folders
         'RECYCLE*\**\INFO2'                                              # XP (RECYCLER / RECYCLED)
@@ -899,7 +900,7 @@ $artefacts = @(
        System = 'ProgramData\Microsoft\Windows\WER\**\*.wer'
        User   = 'AppData\Local\Microsoft\Windows\WER\**\*.wer' }
     # Windows Timeline's activity database.
-    @{ Name = 'Windows Timeline'; Group = 3; PresentByDefault = @(@{ Lineage = 'client'; From = '10.0.17134'; Before = '10.0.22000' } <# Windows 10 1803 to before Windows 11 21H2 #>); User = 'AppData\Local\ConnectedDevicesPlatform\**\ActivitiesCache.db*' }
+    @{ Name = 'Windows Timeline'; Group = 3; User = 'AppData\Local\ConnectedDevicesPlatform\**\ActivitiesCache.db*' }
 )
 
 # The columns of collection.csv, one row per file the run attempted and one per
