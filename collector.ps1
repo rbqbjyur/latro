@@ -61,7 +61,7 @@ param()
 
 # ============================== CONFIG ==============================
 
-$CollectorVersion = '2.3.0'
+$CollectorVersion = '2.4.0'
 
 # No script-wide error suppression: every unit of work has its own try/catch,
 # so an error nobody anticipated shows (in the Live Response transcript) rather
@@ -126,18 +126,15 @@ $profileRoots = @('Users', 'Documents and Settings')
 $profileListKey     = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
 $serviceAccountSids = @('S-1-5-18', 'S-1-5-19', 'S-1-5-20')   # SYSTEM, LocalService, NetworkService
 
-# Reasons a gap is normal for the host, shared by the artefact rows' ExpectMissing
-# rules so the same reason always reads the same in the summary. Only known OS or
-# configuration reasons (off by default, not on this edition/version, not
-# configured) - never usage or changeable state, as an artefact that is merely
-# empty or absent may have been removed and belongs under Warnings. Add a reason
-# here, then refer to it from a row.
+# Reasons a gap is normal for the host, given by the artefact rows'
+# AbsentByDefault spans so the same reason always reads the same in the summary.
+# Only where the knowledge base holds the artefact absent there by default on
+# settled ground - never usage or changeable state, as an artefact that is
+# merely empty or absent may have been removed and belongs under Warnings.
 $gapReasons = @{
-    Server          = 'normal for Windows Server'
-    ServerOnly      = 'Windows Server only'
-    WindowsVersion  = 'not on this Windows version'
-    OffByDefault    = 'off by default'
-    NotDomainJoined = 'not joined to on-premises AD'   # PartOfDomain false: Entra-joined or workgroup
+    ServerOnly     = 'Windows Server only'
+    WindowsVersion = 'not on this Windows version'
+    OffByDefault   = 'off by default'
 }
 
 # Artefacts to collect: one row per summary line. Add an artefact by adding a row.
@@ -152,8 +149,10 @@ $gapReasons = @{
 #            per-drive artefacts such as the Recycle Bin.
 #   User     Path pattern(s) relative to each user profile.
 #   TransactionLogs  Also collect each match's registry transaction logs
-#            (<file>.LOG*: .LOG, .LOG1, .LOG2). Those never get a printed
-#            getfile command.
+#            (<file>.LOG*: .LOG, .LOG1, .LOG2): $true for every pattern of the
+#            row, or a list of file-name patterns for the patterns whose last
+#            segment matches one (a row holding a hive beside other files).
+#            Those never get a printed getfile command.
 #   Literal  Use the path as-is, without listing it. For NTFS metafiles, which
 #            PowerShell can neither see nor open: they stay as 'Not accessible'
 #            placeholders so future raw/sensor-based collection slots in cleanly.
@@ -168,13 +167,20 @@ $gapReasons = @{
 #            (journals, ESE logs). A unit counts as collected only if every main
 #            file in it was read; supporting files alone don't count while a
 #            main file is present.
-#   ExpectMissing  Rules for when "Missing" is normal for this artefact: a list of
-#            @{ When = { condition on $hostInfo, see Get-HostInfo }; Why = <a reason
-#            from $gapReasons> }. The first rule that holds gives the note "(<Why>)".
-#   ExpectPresent  Condition under which this artefact should exist on the host,
-#            so a Missing status is unusual and listed under Warnings. Rows without
-#            it may be present or not (usage, configuration): Missing is shown, but
-#            not warned about.
+#   PresentByDefault  Where the knowledge base holds this artefact present by
+#            default, so a Missing status is unusual and listed under Warnings: a
+#            list of spans @{ Lineage = 'client' or 'server'; From = '<version>';
+#            Before = '<version>' }, From the first OS version it holds on
+#            (inclusive), Before the first it no longer does (exclusive), either
+#            left out for no bound; versions as the host's NtVersion reads them (6.2
+#            for Windows 8, 10.0.17763 for Windows Server 2019), the release named in
+#            a comment. Written from devtools/presence-snapshot.csv, which the path
+#            check compares them with. Rows without it may be present or not:
+#            Missing is shown, but not warned about.
+#   AbsentByDefault  Where the knowledge base holds it absent by default on
+#            settled ground: spans as above, each with Why = <a reason from
+#            $gapReasons>, given as the note "(<Why>)" when the artefact is
+#            Missing.
 #   ExpectLocked  Condition under which "not accessible" is normal; the summary
 #            then notes "(requires <Requires>)", but only if every file of the
 #            row that couldn't be opened failed with ExpectedOpenError. Unknown
@@ -201,20 +207,21 @@ $artefacts = @(
     # 1. Drive root: the timeline-relevant NTFS metafiles (the "NTFS Triforce").
     # A metafile that isn't there (e.g. no USN journal: "Could not find file")
     # is not access denied, so it isn't explained away.
-    @{ Name = '$LogFile';    Group = 1; Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; System = '$LogFile' }   # no getfile route (reported as empty)
-    @{ Name = '$MFT';        Group = 1; Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; GetFile = $true; System = '$MFT' }
-    @{ Name = '$MFTMirr';    Group = 1; Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; System = '$MFTMirr' }   # no getfile line: $MFT's is the one printed
-    @{ Name = '$UsnJrnl:$J'; Group = 1; Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; System = '$Extend\$UsnJrnl:$J' }   # no getfile route
+    @{ Name = '$LogFile';    Group = 1; PresentByDefault = @(@{ Lineage = 'client' } <# every client release #>, @{ Lineage = 'server' } <# every server release #>); Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; System = '$LogFile' }   # no getfile route (reported as empty)
+    @{ Name = '$MFT';        Group = 1; PresentByDefault = @(@{ Lineage = 'client' } <# every client release #>, @{ Lineage = 'server' } <# every server release #>); Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; GetFile = $true; System = '$MFT' }
+    @{ Name = '$MFTMirr';    Group = 1; PresentByDefault = @(@{ Lineage = 'client' } <# every client release #>, @{ Lineage = 'server'; From = '5.2' } <# Windows Server 2003 on #>); Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; System = '$MFTMirr' }   # no getfile line: $MFT's is the one printed
+    @{ Name = '$UsnJrnl:$J'; Group = 1; PresentByDefault = @(@{ Lineage = 'client'; From = '6.1' } <# Windows 7 on #>); Drives = 'NTFS'; ExpectLocked = { <# NTFS metafile #> $true }; ExpectedOpenError = 'AccessDenied'; Literal = $true; System = '$Extend\$UsnJrnl:$J' }   # no getfile route
 
     # 2. Other system files.
     # Application compatibility / program execution records: Amcache.hve and the
     # Program Compatibility Assistant files (Windows 11 22H2+), then their
     # predecessors - RecentFileCache.bcf (Windows 7) and Syscache.hve (Windows 7 /
     # Server 2008 R2), both replaced by Amcache.hve in Windows 8 - then Windows.old.
-    @{ Name = 'Application Compatibility'; Group = 2; ExpectPresent = { <# Amcache, or RecentFileCache on Windows 7 #> $true }; TransactionLogs = $true
+    @{ Name = 'Application Compatibility'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '6.1' } <# Windows 7 on #>, @{ Lineage = 'server'; From = '6.1' } <# Windows Server 2008 R2 on #>); TransactionLogs = @('*.hve', 'RecentFileCache.bcf')
        ExpectLocked = { <# Syscache.hve is a loaded hive before Windows 8 #> $hostInfo.Build -and $hostInfo.Build -lt 9200 }
        System = @(
            'Windows\AppCompat\Programs\Amcache.hve'
+           'Windows\AppCompat\Programs\Inventory*.db'
            'Windows\appcompat\pca\*'
            'Windows\AppCompat\Programs\RecentFileCache.bcf'               # Windows 7
            'System Volume Information\Syscache.hve'                       # Windows 7 / Server 2008 R2
@@ -222,10 +229,10 @@ $artefacts = @(
            'Windows.old\Windows\AppCompat\Programs\RecentFileCache.bcf'
        ) }
     # BITS job database (qmgr.db) and its ESE logs: downloads and persistence.
-    @{ Name = 'BITS';          Group = 2; ExpectPresent = { $true }; ExpectLocked = { <# qmgr.db, held by the BITS service while it runs #> $true }; System = 'ProgramData\Microsoft\Network\Downloader\**\*' }
+    @{ Name = 'BITS';          Group = 2; PresentByDefault = @(@{ Lineage = 'client' } <# every client release #>, @{ Lineage = 'server' } <# every server release #>); ExpectLocked = { <# qmgr.db, held by the BITS service while it runs #> $true }; System = 'ProgramData\Microsoft\Network\Downloader\**\*' }
     # Defender text logs (MPLog etc.) and detection history; not the quarantine
     # (file content). Defender event logs are covered by Event Logs.
-    @{ Name = 'Defender Logs'; Group = 2; System = @(
+    @{ Name = 'Defender Logs'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '6.0' } <# Windows Vista on #>, @{ Lineage = 'server'; From = '10.0.14393' } <# Windows Server 2016 on #>); System = @(
         'ProgramData\Microsoft\Windows Defender\Support\**\*'
         'ProgramData\Microsoft\Windows Defender\Scans\History\Service\DetectionHistory\**\*'
         'ProgramData\Microsoft\Windows Defender\Scans\History\Service\Detections.log'
@@ -242,7 +249,7 @@ $artefacts = @(
         'Windows\System32\dns\**\*'
         'Windows\System32\winevt\Logs\Microsoft-Windows-DNSServer%4Analytical.etl'
     ) }
-    @{ Name = 'Event Logs'; Group = 2; ExpectPresent = { $true }; System = @(
+    @{ Name = 'Event Logs'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '5.0' } <# Windows 2000 Professional on #>, @{ Lineage = 'server'; From = '5.0' } <# Windows 2000 Server on #>); System = @(
         'Windows\System32\winevt\logs\*.evtx'
         'Windows\System32\config\*.evt'                                  # XP
         'Windows.old\Windows\System32\winevt\logs\*.evtx'
@@ -251,14 +258,14 @@ $artefacts = @(
     @{ Name = 'Event Trace Logs'; Group = 2; System = 'Windows\System32\LogFiles\WMI\**\*' }
     # Exchange Server's transport logs; only where Exchange Server is installed.
     @{ Name = 'Exchange Server Logs'; Group = 2; System = 'Program Files\Microsoft\Exchange Server\*\TransportRoles\Logs\**\*.log' }
-    @{ Name = 'Firewall Log'; Group = 2; ExpectMissing = @(@{ When = { $true }; Why = $gapReasons.OffByDefault }); System = @(                     # logging off by default
+    @{ Name = 'Firewall Log'; Group = 2; AbsentByDefault = @(@{ Lineage = 'client'; Why = $gapReasons.OffByDefault } <# every client release #>, @{ Lineage = 'server'; Why = $gapReasons.OffByDefault } <# every server release #>); System = @(                     # logging off by default
         'Windows\System32\LogFiles\Firewall\pfirewall.*'
         'Windows.old\Windows\System32\LogFiles\Firewall\pfirewall.*'
     ) }
     # Group Policy: local policy and scripts, and the cached copies of domain GPOs
     # (incl. Group Policy Preferences XML such as ScheduledTasks.xml) - persistence
     # and deployment evidence.
-    @{ Name = 'Group Policy'; Group = 2; ExpectMissing = @(@{ When = { $hostInfo.DomainJoined -eq $false }; Why = $gapReasons.NotDomainJoined })
+    @{ Name = 'Group Policy'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '5.0'; Before = '6.0' } <# Windows 2000 Professional to before Windows Vista #>, @{ Lineage = 'server'; From = '5.0' } <# Windows 2000 Server on #>)
        System = @(
            'Windows\System32\GroupPolicy\**\*'
            'ProgramData\Microsoft\Group Policy\History\**\*'
@@ -275,16 +282,20 @@ $artefacts = @(
         'Windows\System32\LogFiles\W3SVC*\*.log'
         'Windows.old\Windows\System32\LogFiles\W3SVC*\*.log'
     ) }
+    # INF files: the setup information files of drivers and components installed.
+    @{ Name = 'INF files'; Group = 2; PresentByDefault = @(@{ Lineage = 'client' } <# every client release #>, @{ Lineage = 'server' } <# every server release #>); System = 'Windows\INF\*.inf' }
     # The Malicious Software Removal Tool's log.
     @{ Name = 'MSRT Log'; Group = 2; System = 'Windows\debug\mrt.log' }
-    @{ Name = 'Prefetch'; Group = 2; ExpectPresent = { <# on by default on workstations #> $hostInfo.Server -eq $false }; ExpectMissing = @(@{ When = { $hostInfo.Server }; Why = $gapReasons.Server }); System = @(
+    # Active Directory's database on a domain controller, held open while it runs.
+    @{ Name = 'NTDS'; Group = 2; ExpectLocked = { <# ntds.dit, opened exclusively while the domain controller runs #> $hostInfo.DomainController }; System = 'Windows\NTDS\ntds.dit' }
+    @{ Name = 'Prefetch'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '6.2' } <# Windows 8 on #>); System = @(
         'Windows\Prefetch\*.pf'
         'Windows.old\Windows\Prefetch\*.pf'
     ) }
     # Transaction logs hold un-flushed changes, so Registry Explorer / RegRipper /
     # plaso can replay a dirty hive and recover the most recent entries. RegBack
     # copies are usually empty on current Windows, but older snapshots when present.
-    @{ Name = 'Registry Hives (system)'; Group = 2; ExpectPresent = { $true }; ExpectLocked = { <# loaded hives #> $true }; TransactionLogs = $true; System = @(
+    @{ Name = 'Registry Hives (system)'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '4.0' } <# Windows NT 4.0 Workstation on #>, @{ Lineage = 'server'; From = '4.0' } <# Windows NT 4.0 Server on #>); ExpectLocked = { <# loaded hives #> $true }; TransactionLogs = $true; System = @(
         'Windows\System32\config\SAM'
         'Windows\System32\config\SECURITY'
         'Windows\System32\config\SOFTWARE'
@@ -309,11 +320,11 @@ $artefacts = @(
         'Windows.old\Windows\System32\config\RegBack\SYSTEM1'
     ) }
     # XP restore-point logs (rp.log: each restore point's creation time and description).
-    @{ Name = 'Restore Point Logs'; Group = 2; ExpectMissing = @(@{ When = { $hostInfo.Build -ge 6000 }; Why = $gapReasons.WindowsVersion }); System = 'System Volume Information\_restore*\RP*\rp.log' }
+    @{ Name = 'Restore Point Logs'; Group = 2; System = 'System Volume Information\_restore*\RP*\rp.log' }
     # Configuration Manager (SCCM) client logs; only on ConfigMgr-managed hosts.
     @{ Name = 'SCCM Client Logs';   Group = 2; System = 'Windows\CCM\Logs\*' }
     # XML task definitions, plus PowerShell scheduled jobs (definitions and output).
-    @{ Name = 'Scheduled Tasks'; Group = 2; ExpectPresent = { $true }
+    @{ Name = 'Scheduled Tasks'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '5.1' } <# Windows XP on #>, @{ Lineage = 'server'; From = '5.2' } <# Windows Server 2003 on #>)
        System = @(
            'Windows\System32\Tasks\**\*'
            'Windows\SysWOW64\Tasks\**\*'
@@ -328,7 +339,7 @@ $artefacts = @(
        )
        User = 'AppData\Local\Microsoft\Windows\PowerShell\ScheduledJobs\**\*' }
     # Device/driver install logs.
-    @{ Name = 'SetupAPI'; Group = 2; ExpectPresent = { $true }; System = @(
+    @{ Name = 'SetupAPI'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '5.1'; Before = '10.0.26100' } <# Windows XP to before Windows 11 24H2 #>); System = @(
         'Windows\INF\setupapi*.log'
         'Windows\setupapi.log'                                           # XP
         'Windows.old\Windows\INF\setupapi*.log'
@@ -342,13 +353,26 @@ $artefacts = @(
         'Program Files (x86)\Microsoft SQL Server\*\MSSQL\LOG\ERRORLOG*'
     ) }
     # SRUDB.dat plus its ESE logs and checkpoint, for dirty-database recovery.
-    @{ Name = 'SRUM'; Group = 2; ExpectPresent = { <# workstations, Windows 8+ #> $hostInfo.Server -eq $false -and $hostInfo.Build -ge 9200 }; ExpectMissing = @(@{ When = { $hostInfo.Build -and $hostInfo.Build -lt 9200 }; Why = $gapReasons.WindowsVersion }); ExpectLocked = { <# often held open #> $true }; System = @(
+    @{ Name = 'SRUM'; Group = 2; PresentByDefault = @(@{ Lineage = 'client'; From = '6.2' } <# Windows 8 on #>, @{ Lineage = 'server'; From = '10.0.17763' } <# Windows Server 2019 on #>); ExpectLocked = { <# often held open #> $true }; System = @(
         'Windows\System32\SRU\**\*'
         'Windows.old\Windows\System32\SRU\**\*'
     ) }
     # User Access Logging (Windows Server): clients and users per role, with first
     # and last access times. ESE databases plus their logs, needed to repair them.
-    @{ Name = 'User Access Logging (SUM)'; Group = 2; ExpectPresent = { <# on by default on Windows Server #> $hostInfo.Server }; ExpectMissing = @(@{ When = { $hostInfo.Server -eq $false }; Why = $gapReasons.ServerOnly }); ExpectLocked = { <# Current.mdb held by the UAL service #> $true }; System = 'Windows\System32\LogFiles\Sum\**\*' }
+    @{ Name = 'User Access Logging (SUM)'; Group = 2; PresentByDefault = @(@{ Lineage = 'server'; From = '10.0.14393' } <# Windows Server 2016 on #>); AbsentByDefault = @(@{ Lineage = 'client'; Why = $gapReasons.ServerOnly } <# every client release #>); ExpectLocked = { <# Current.mdb held by the UAL service #> $true }; System = 'Windows\System32\LogFiles\Sum\**\*' }
+    # Windows Search's index: the ESE database Windows.edb with its logs and
+    # checkpoint, and the SQLite databases Windows.db and Windows-gather.db with
+    # their WALs, counted as one unit with the databases as its main files.
+    @{ Name = 'Windows Search index'; Group = 2; CountBy = 'Folder'; SupportingFiles = @('edb.chk', 'edb*.log', 'edbres*.jrs', '*-wal'); PresentByDefault = @(@{ Lineage = 'client'; From = '6.0' } <# Windows Vista on #>); System = @(
+           'ProgramData\Microsoft\Search\Data\Applications\Windows\Windows.edb'
+           'ProgramData\Microsoft\Search\Data\Applications\Windows\edb.chk'
+           'ProgramData\Microsoft\Search\Data\Applications\Windows\edb*.log'
+           'ProgramData\Microsoft\Search\Data\Applications\Windows\edbres*.jrs'
+           'ProgramData\Microsoft\Search\Data\Applications\Windows\Windows.db'
+           'ProgramData\Microsoft\Search\Data\Applications\Windows\Windows.db-wal'
+           'ProgramData\Microsoft\Search\Data\Applications\Windows\Windows-gather.db'
+           'ProgramData\Microsoft\Search\Data\Applications\Windows\Windows-gather.db-wal'
+       ) }
 
     # 3. User-specific. Service accounts (SYSTEM, LocalService, NetworkService) are
     # not user profiles; where they matter, their paths are listed under System.
@@ -362,7 +386,7 @@ $artefacts = @(
     # Browser bookmarks: one pattern per browser (or channel), counted per user x
     # browser x profile, in Browser History's order; legacy Edge's Spartan.edb;
     # XP profile paths last.
-    @{ Name = 'Browser Bookmarks'; Group = 3; CountBy = 'Folder'
+    @{ Name = 'Browser Bookmarks'; Group = 3; PresentByDefault = @(@{ Lineage = 'client'; From = '5.1' } <# Windows XP on #>); CountBy = 'Folder'
        User = @(
            'AppData\Local\Microsoft\Edge\User Data\*\Bookmarks*'                        # Edge
            'AppData\Local\Microsoft\Edge Beta\User Data\*\Bookmarks*'                   # Edge Beta
@@ -395,10 +419,15 @@ $artefacts = @(
     # Browser cookies: one pattern per browser, counted per user x browser x
     # profile (with their journals); Firefox; IE's cookie folders; XP profile
     # paths last.
-    @{ Name = 'Browser Cookies'; Group = 3; ExpectLocked = { <# IE's cookie index.dat, locked from boot #> $true }; CountBy = 'Folder'
+    @{ Name = 'Browser Cookies'; Group = 3; PresentByDefault = @(@{ Lineage = 'client'; From = '5.0' } <# Windows 2000 Professional on #>, @{ Lineage = 'server'; From = '5.0' } <# Windows 2000 Server on #>); ExpectLocked = { <# IE's cookie index.dat, locked from boot #> $true }; CountBy = 'Folder'
        SupportingFiles = @('*-journal', '*-wal', '*-shm')
        User = @(
+           'AppData\Local\Microsoft\Edge\User Data\*\Network\Cookies*'                      # Edge
+           'AppData\Local\Microsoft\Edge Beta\User Data\*\Network\Cookies*'                 # Edge Beta
+           'AppData\Local\Microsoft\Edge Dev\User Data\*\Network\Cookies*'                  # Edge Dev
+           'AppData\Local\Microsoft\Edge SxS\User Data\*\Network\Cookies*'                  # Edge Canary
            'AppData\Local\Google\Chrome\User Data\*\Cookies*'                           # Chrome
+           'AppData\Local\Google\Chrome\User Data\*\Network\Cookies*'                   # Chrome
            'AppData\Local\Google\Chrome Beta\User Data\*\Cookies*'                      # Chrome Beta
            'AppData\Local\Google\Chrome Dev\User Data\*\Cookies*'                       # Chrome Dev
            'AppData\Local\Google\Chrome SxS\User Data\*\Cookies*'                       # Chrome Canary
@@ -406,6 +435,7 @@ $artefacts = @(
            'AppData\Local\BraveSoftware\Brave-Browser\User Data\*\Cookies*'             # Brave
            'AppData\Local\Vivaldi\User Data\*\Cookies*'                                 # Vivaldi
            'AppData\Local\Yandex\YandexBrowser\User Data\*\Cookies*'                    # Yandex
+           'AppData\Local\Packages\TheBrowserCompany.Arc_ttt1ap7aakyb4\LocalCache\Local\Arc\User Data\*\Network\Cookies*' # Arc
            'AppData\Local\CocCoc\Browser\User Data\*\Cookies*'                          # Coc Coc
            'AppData\Local\Tencent\QQBrowser\User Data\*\Cookies*'                       # QQ Browser
            'AppData\Local\UCBrowser\User Data*\*\Cookies*'                              # UC Browser
@@ -425,13 +455,53 @@ $artefacts = @(
            'Application Data\Mozilla\Firefox\Profiles\*\cookies.sqlite*'                # XP: Firefox
            'Cookies\**\*'                                                               # XP: IE
        ) }
-    # Browser extensions: Firefox's extensions.json, per user x profile.
-    @{ Name = 'Browser Extensions'; Group = 3; CountBy = 'Folder'; User = 'AppData\Roaming\Mozilla\Firefox\Profiles\*\extensions.json' }
+    # Browser extensions: Chrome's Extension Activity, Firefox's extensions.json and
+    # addons.sqlite (with its journal or WAL), per user x profile.
+    @{ Name = 'Browser Extensions'; Group = 3; CountBy = 'Folder'; SupportingFiles = @('*-journal', '*-wal', '*-shm')
+       User = @(
+           'AppData\Local\Google\Chrome\User Data\*\Extension Activity'                     # Chrome
+           'AppData\Roaming\Mozilla\Firefox\Profiles\*\extensions.json'                     # Firefox
+           'AppData\Roaming\Mozilla\Firefox\Profiles\*\addons.sqlite*'                      # Firefox
+           'Application Data\Mozilla\Firefox\Profiles\*\addons.sqlite*'                     # XP: Firefox
+       ) }
+    # Form data: the browsers' form and autofill databases, per user x profile.
+    @{ Name = 'Browser Form Data'; Group = 3; CountBy = 'Folder'; SupportingFiles = @('*-journal', '*-wal', '*-shm')
+       User = @(
+           'AppData\Local\Microsoft\Edge\User Data\*\Web Data*'                             # Edge
+           'AppData\Local\Microsoft\Edge Beta\User Data\*\Web Data*'                        # Edge Beta
+           'AppData\Local\Microsoft\Edge Dev\User Data\*\Web Data*'                         # Edge Dev
+           'AppData\Local\Microsoft\Edge SxS\User Data\*\Web Data*'                         # Edge Canary
+           'AppData\Local\Google\Chrome\User Data\*\Web Data*'                              # Chrome
+           'AppData\Local\Google\Chrome Beta\User Data\*\Web Data*'                         # Chrome Beta
+           'AppData\Local\Google\Chrome Dev\User Data\*\Web Data*'                          # Chrome Dev
+           'AppData\Local\Google\Chrome SxS\User Data\*\Web Data*'                          # Chrome Canary
+           'AppData\Local\Chromium\User Data\*\Web Data*'                                   # Chromium
+           'AppData\Local\BraveSoftware\Brave-Browser\User Data\*\Web Data*'                # Brave
+           'AppData\Local\Vivaldi\User Data\*\Web Data*'                                    # Vivaldi
+           'AppData\Local\Yandex\YandexBrowser\User Data\*\Web Data*'                       # Yandex
+           'AppData\Local\Packages\TheBrowserCompany.Arc_ttt1ap7aakyb4\LocalCache\Local\Arc\User Data\*\Web Data*' # Arc
+           'AppData\Local\CocCoc\Browser\User Data\*\Web Data*'                             # Coc Coc
+           'AppData\Local\Tencent\QQBrowser\User Data\*\Web Data*'                          # QQ Browser
+           'AppData\Local\UCBrowser\User Data*\*\Web Data*'                                 # UC Browser
+           'AppData\Roaming\360se6\User Data\*\Web Data*'                                   # 360 Secure Browser
+           'AppData\Local\WaveBrowser\User Data\*\Web Data*'                                # Wave Browser
+           'AppData\Local\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Web Data*'     # Prisma Access Browser
+           'AppData\Local\Supermium\User Data\*\Web Data*'                                  # Supermium
+           'AppData\Roaming\Mozilla\Firefox\Profiles\*\formhistory.sqlite*'                 # Firefox
+           'Local Settings\Application Data\Google\Chrome\User Data\*\Web Data*'            # XP: Chrome
+           'Local Settings\Application Data\Google\Chrome Beta\User Data\*\Web Data*'       # XP: Chrome Beta
+           'Local Settings\Application Data\Google\Chrome Dev\User Data\*\Web Data*'        # XP: Chrome Dev
+           'Local Settings\Application Data\Google\Chrome SxS\User Data\*\Web Data*'        # XP: Chrome Canary
+           'Local Settings\Application Data\Chromium\User Data\*\Web Data*'                 # XP: Chromium
+           'Local Settings\Application Data\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Web Data*' # XP: Prisma Access Browser
+           'Application Data\Supermium\User Data\*\Web Data*'                               # XP: Supermium
+           'Application Data\Mozilla\Firefox\Profiles\*\formhistory.sqlite*'                # XP: Firefox
+       ) }
     # Browser history: one pattern per browser (or channel), counted per user x
     # browser x profile. History DB only (plus its journal). Maintained browsers
     # first, then IE / legacy Edge (WebCache, index.dat) and other discontinued
     # browsers or formats, then XP profile paths.
-    @{ Name = 'Browser History'; Group = 3; ExpectLocked = { <# a logged-on user's WebCache #> $true }; CountBy = 'Folder'
+    @{ Name = 'Browser History'; Group = 3; PresentByDefault = @(@{ Lineage = 'client'; From = '5.0' } <# Windows 2000 Professional on #>, @{ Lineage = 'server'; From = '5.0' } <# Windows 2000 Server on #>); ExpectLocked = { <# a logged-on user's WebCache #> $true }; CountBy = 'Folder'
        SupportingFiles = @('*-journal', '*-wal', '*-shm', '*Provider Cache', '*.log', '*.chk', '*.jrs', '*.jfm')
        System = @(
            'Windows\System32\config\systemprofile\AppData\Local\Google\Chrome\User Data\*\History*'
@@ -522,26 +592,59 @@ $artefacts = @(
     @{ Name = 'Browser Preferences'; Group = 3; CountBy = 'Folder'
        User = @(
            'AppData\Local\Microsoft\Edge\User Data\*\Preferences'                       # Edge
+           'AppData\Local\Microsoft\Edge\User Data\*\Secure Preferences'                # Edge
+           'AppData\Local\Microsoft\Edge\User Data\*\Sync Data\SyncData.sqlite3'        # Edge
            'AppData\Local\Microsoft\Edge Beta\User Data\*\Preferences'                  # Edge Beta
+           'AppData\Local\Microsoft\Edge Beta\User Data\*\Secure Preferences'           # Edge Beta
+           'AppData\Local\Microsoft\Edge Beta\User Data\*\Sync Data\SyncData.sqlite3'   # Edge Beta
            'AppData\Local\Microsoft\Edge Dev\User Data\*\Preferences'                   # Edge Dev
+           'AppData\Local\Microsoft\Edge Dev\User Data\*\Secure Preferences'            # Edge Dev
+           'AppData\Local\Microsoft\Edge Dev\User Data\*\Sync Data\SyncData.sqlite3'    # Edge Dev
            'AppData\Local\Microsoft\Edge SxS\User Data\*\Preferences'                   # Edge Canary
+           'AppData\Local\Microsoft\Edge SxS\User Data\*\Secure Preferences'            # Edge Canary
+           'AppData\Local\Microsoft\Edge SxS\User Data\*\Sync Data\SyncData.sqlite3'    # Edge Canary
            'AppData\Local\Google\Chrome\User Data\*\Preferences'                        # Chrome
+           'AppData\Local\Google\Chrome\User Data\*\Secure Preferences'                 # Chrome
+           'AppData\Local\Google\Chrome\User Data\*\Sync Data\SyncData.sqlite3'         # Chrome
            'AppData\Local\Google\Chrome Beta\User Data\*\Preferences'                   # Chrome Beta
+           'AppData\Local\Google\Chrome Beta\User Data\*\Secure Preferences'            # Chrome Beta
+           'AppData\Local\Google\Chrome Beta\User Data\*\Sync Data\SyncData.sqlite3'    # Chrome Beta
            'AppData\Local\Google\Chrome Dev\User Data\*\Preferences'                    # Chrome Dev
+           'AppData\Local\Google\Chrome Dev\User Data\*\Secure Preferences'             # Chrome Dev
+           'AppData\Local\Google\Chrome Dev\User Data\*\Sync Data\SyncData.sqlite3'     # Chrome Dev
            'AppData\Local\Google\Chrome SxS\User Data\*\Preferences'                    # Chrome Canary
+           'AppData\Local\Google\Chrome SxS\User Data\*\Secure Preferences'             # Chrome Canary
+           'AppData\Local\Google\Chrome SxS\User Data\*\Sync Data\SyncData.sqlite3'     # Chrome Canary
            'AppData\Local\Chromium\User Data\*\Preferences'                             # Chromium
+           'AppData\Local\Chromium\User Data\*\Secure Preferences'                      # Chromium
+           'AppData\Local\Chromium\User Data\*\Sync Data\SyncData.sqlite3'              # Chromium
            'AppData\Local\BraveSoftware\Brave-Browser\User Data\*\Preferences'          # Brave
+           'AppData\Local\BraveSoftware\Brave-Browser\User Data\*\Secure Preferences'   # Brave
            'AppData\Local\Vivaldi\User Data\*\Preferences'                              # Vivaldi
+           'AppData\Local\Vivaldi\User Data\*\Secure Preferences'                       # Vivaldi
            'AppData\Local\Yandex\YandexBrowser\User Data\*\Preferences'                 # Yandex
+           'AppData\Local\Yandex\YandexBrowser\User Data\*\Secure Preferences'          # Yandex
            'AppData\Local\Packages\TheBrowserCompany.Arc_ttt1ap7aakyb4\LocalCache\Local\Arc\User Data\*\Preferences' # Arc
+           'AppData\Local\Packages\TheBrowserCompany.Arc_ttt1ap7aakyb4\LocalCache\Local\Arc\User Data\*\Sync Data\**\*' # Arc
            'AppData\Local\CocCoc\Browser\User Data\*\Preferences'                       # Coc Coc
+           'AppData\Local\CocCoc\Browser\User Data\*\Sync Data\**\*'                    # Coc Coc
            'AppData\Local\Tencent\QQBrowser\User Data\*\Preferences'                    # QQ Browser
+           'AppData\Local\Tencent\QQBrowser\User Data\*\Sync Data\**\*'                 # QQ Browser
            'AppData\Local\UCBrowser\User Data*\*\Preferences'                           # UC Browser
+           'AppData\Local\UCBrowser\User Data*\*\Sync Data\**\*'                        # UC Browser
            'AppData\Roaming\360se6\User Data\*\Preferences'                             # 360 Secure Browser
+           'AppData\Roaming\360se6\User Data\*\Secure Preferences'                      # 360 Secure Browser
+           'AppData\Roaming\360se6\User Data\*\Sync Data\**\*'                          # 360 Secure Browser
            'AppData\Local\WaveBrowser\User Data\*\Preferences'                          # Wave Browser
+           'AppData\Local\WaveBrowser\User Data\*\Sync Data\SyncData.sqlite3'           # Wave Browser
            'AppData\Local\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Preferences' # Prisma Access Browser
+           'AppData\Local\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Secure Preferences' # Prisma Access Browser
+           'AppData\Local\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Sync Data\SyncData.sqlite3' # Prisma Access Browser
            'AppData\Local\Supermium\User Data\*\Preferences'                            # Supermium
+           'AppData\Local\Supermium\User Data\*\Secure Preferences'                     # Supermium
+           'AppData\Local\Supermium\User Data\*\Sync Data\**\*'                         # Supermium
            'AppData\Roaming\Mozilla\Firefox\Profiles\*\prefs.js'                        # Firefox
+           'AppData\Roaming\Mozilla\Firefox\Profiles\*\signedinuser.json'               # Firefox
            'Local Settings\Application Data\Google\Chrome\User Data\*\Preferences'      # XP: Chrome
            'Local Settings\Application Data\Google\Chrome Beta\User Data\*\Preferences' # XP: Chrome Beta
            'Local Settings\Application Data\Google\Chrome Dev\User Data\*\Preferences'  # XP: Chrome Dev
@@ -550,49 +653,154 @@ $artefacts = @(
            'Local Settings\Application Data\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Preferences' # XP: Prisma Access
            'Application Data\Supermium\User Data\*\Preferences'                         # XP: Supermium
        ) }
-    # Browser sessions: each Chromium-family profile's Sessions folder (Brave's
-    # Default profile only, as the store holds it), Firefox's session store and
+    # Saved logins: the browsers' saved-login stores, per user x profile.
+    @{ Name = 'Browser Saved Logins'; Group = 3; CountBy = 'Folder'
+       User = @(
+           'AppData\Local\BraveSoftware\Brave-Browser\User Data\*\Login Data'               # Brave
+           'AppData\Local\Vivaldi\User Data\*\Login Data'                                   # Vivaldi
+           'AppData\Local\WaveBrowser\User Data\*\Login Data'                               # Wave Browser
+           'AppData\Local\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Login Data'    # Prisma Access Browser
+           'AppData\Roaming\Mozilla\Firefox\Profiles\*\logins.json'                         # Firefox
+           'Local Settings\Application Data\Google\Chrome\User Data\*\Login Data'           # XP: Chrome
+           'Local Settings\Application Data\Google\Chrome Beta\User Data\*\Login Data'      # XP: Chrome Beta
+           'Local Settings\Application Data\Google\Chrome Dev\User Data\*\Login Data'       # XP: Chrome Dev
+           'Local Settings\Application Data\Google\Chrome SxS\User Data\*\Login Data'       # XP: Chrome Canary
+           'Local Settings\Application Data\Chromium\User Data\*\Login Data'                # XP: Chromium
+           'Local Settings\Application Data\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Login Data' # XP: Prisma Access Browser
+           'Application Data\Mozilla\Firefox\Profiles\*\logins.json'                        # XP: Firefox
+       ) }
+    # Browser sessions: each Chromium-family profile's Sessions folder and its
+    # Current/Last Session and Tabs files, Firefox's session store and
     # its backups, IE's recovery and tab roaming folders; XP profile paths last.
     # Counted per file: a profile's sessions are several files.
-    @{ Name = 'Browser Sessions'; Group = 3; ExpectLocked = { <# a running browser's current session files #> $true }
+    @{ Name = 'Browser Sessions'; Group = 3; PresentByDefault = @(@{ Lineage = 'client'; From = '6.1' } <# Windows 7 on #>); ExpectLocked = { <# a running browser's current session files #> $true }
        User = @(
            'AppData\Local\Microsoft\Edge\User Data\*\Sessions\*'                        # Edge
+           'AppData\Local\Microsoft\Edge\User Data\*\Current Session'                   # Edge
+           'AppData\Local\Microsoft\Edge\User Data\*\Current Tabs'                      # Edge
+           'AppData\Local\Microsoft\Edge\User Data\*\Last Session'                      # Edge
+           'AppData\Local\Microsoft\Edge\User Data\*\Last Tabs'                         # Edge
            'AppData\Local\Microsoft\Edge Beta\User Data\*\Sessions\*'                   # Edge Beta
+           'AppData\Local\Microsoft\Edge Beta\User Data\*\Current Session'              # Edge Beta
+           'AppData\Local\Microsoft\Edge Beta\User Data\*\Current Tabs'                 # Edge Beta
+           'AppData\Local\Microsoft\Edge Beta\User Data\*\Last Session'                 # Edge Beta
+           'AppData\Local\Microsoft\Edge Beta\User Data\*\Last Tabs'                    # Edge Beta
            'AppData\Local\Microsoft\Edge Dev\User Data\*\Sessions\*'                    # Edge Dev
+           'AppData\Local\Microsoft\Edge Dev\User Data\*\Current Session'               # Edge Dev
+           'AppData\Local\Microsoft\Edge Dev\User Data\*\Current Tabs'                  # Edge Dev
+           'AppData\Local\Microsoft\Edge Dev\User Data\*\Last Session'                  # Edge Dev
+           'AppData\Local\Microsoft\Edge Dev\User Data\*\Last Tabs'                     # Edge Dev
            'AppData\Local\Microsoft\Edge SxS\User Data\*\Sessions\*'                    # Edge Canary
+           'AppData\Local\Microsoft\Edge SxS\User Data\*\Current Session'               # Edge Canary
+           'AppData\Local\Microsoft\Edge SxS\User Data\*\Current Tabs'                  # Edge Canary
+           'AppData\Local\Microsoft\Edge SxS\User Data\*\Last Session'                  # Edge Canary
+           'AppData\Local\Microsoft\Edge SxS\User Data\*\Last Tabs'                     # Edge Canary
            'AppData\Local\Google\Chrome\User Data\*\Sessions\*'                         # Chrome
+           'AppData\Local\Google\Chrome\User Data\*\Current Session'                    # Chrome
+           'AppData\Local\Google\Chrome\User Data\*\Current Tabs'                       # Chrome
+           'AppData\Local\Google\Chrome\User Data\*\Last Session'                       # Chrome
+           'AppData\Local\Google\Chrome\User Data\*\Last Tabs'                          # Chrome
            'AppData\Local\Google\Chrome Beta\User Data\*\Sessions\*'                    # Chrome Beta
+           'AppData\Local\Google\Chrome Beta\User Data\*\Current Session'               # Chrome Beta
+           'AppData\Local\Google\Chrome Beta\User Data\*\Current Tabs'                  # Chrome Beta
+           'AppData\Local\Google\Chrome Beta\User Data\*\Last Session'                  # Chrome Beta
+           'AppData\Local\Google\Chrome Beta\User Data\*\Last Tabs'                     # Chrome Beta
            'AppData\Local\Google\Chrome Dev\User Data\*\Sessions\*'                     # Chrome Dev
+           'AppData\Local\Google\Chrome Dev\User Data\*\Current Session'                # Chrome Dev
+           'AppData\Local\Google\Chrome Dev\User Data\*\Current Tabs'                   # Chrome Dev
+           'AppData\Local\Google\Chrome Dev\User Data\*\Last Session'                   # Chrome Dev
+           'AppData\Local\Google\Chrome Dev\User Data\*\Last Tabs'                      # Chrome Dev
            'AppData\Local\Google\Chrome SxS\User Data\*\Sessions\*'                     # Chrome Canary
+           'AppData\Local\Google\Chrome SxS\User Data\*\Current Session'                # Chrome Canary
+           'AppData\Local\Google\Chrome SxS\User Data\*\Current Tabs'                   # Chrome Canary
+           'AppData\Local\Google\Chrome SxS\User Data\*\Last Session'                   # Chrome Canary
+           'AppData\Local\Google\Chrome SxS\User Data\*\Last Tabs'                      # Chrome Canary
            'AppData\Local\Chromium\User Data\*\Sessions\*'                              # Chromium
-           'AppData\Local\BraveSoftware\Brave-Browser\User Data\Default\Sessions\*'     # Brave
+           'AppData\Local\Chromium\User Data\*\Current Session'                         # Chromium
+           'AppData\Local\Chromium\User Data\*\Current Tabs'                            # Chromium
+           'AppData\Local\Chromium\User Data\*\Last Session'                            # Chromium
+           'AppData\Local\Chromium\User Data\*\Last Tabs'                               # Chromium
+           'AppData\Local\BraveSoftware\Brave-Browser\User Data\*\Sessions\*'           # Brave
+           'AppData\Local\BraveSoftware\Brave-Browser\User Data\*\Current Session'      # Brave
+           'AppData\Local\BraveSoftware\Brave-Browser\User Data\*\Current Tabs'         # Brave
            'AppData\Local\Vivaldi\User Data\*\Sessions\*'                               # Vivaldi
            'AppData\Local\Yandex\YandexBrowser\User Data\*\Sessions\*'                  # Yandex
            'AppData\Local\Packages\TheBrowserCompany.Arc_ttt1ap7aakyb4\LocalCache\Local\Arc\User Data\*\Sessions\*' # Arc
            'AppData\Local\CocCoc\Browser\User Data\*\Sessions\*'                        # Coc Coc
+           'AppData\Local\CocCoc\Browser\User Data\*\Current Session'                   # Coc Coc
+           'AppData\Local\CocCoc\Browser\User Data\*\Current Tabs'                      # Coc Coc
+           'AppData\Local\CocCoc\Browser\User Data\*\Last Session'                      # Coc Coc
+           'AppData\Local\CocCoc\Browser\User Data\*\Last Tabs'                         # Coc Coc
            'AppData\Local\Tencent\QQBrowser\User Data\*\Sessions\*'                     # QQ Browser
+           'AppData\Local\Tencent\QQBrowser\User Data\*\Current Session'                # QQ Browser
+           'AppData\Local\Tencent\QQBrowser\User Data\*\Current Tabs'                   # QQ Browser
+           'AppData\Local\Tencent\QQBrowser\User Data\*\Last Session'                   # QQ Browser
+           'AppData\Local\Tencent\QQBrowser\User Data\*\Last Tabs'                      # QQ Browser
            'AppData\Local\UCBrowser\User Data*\*\Sessions\*'                            # UC Browser
+           'AppData\Local\UCBrowser\User Data*\*\Current Session'                       # UC Browser
+           'AppData\Local\UCBrowser\User Data*\*\Current Tabs'                          # UC Browser
+           'AppData\Local\UCBrowser\User Data*\*\Last Session'                          # UC Browser
+           'AppData\Local\UCBrowser\User Data*\*\Last Tabs'                             # UC Browser
            'AppData\Roaming\360se6\User Data\*\Sessions\*'                              # 360 Secure Browser
+           'AppData\Roaming\360se6\User Data\*\Current Session'                         # 360 Secure Browser
+           'AppData\Roaming\360se6\User Data\*\Current Tabs'                            # 360 Secure Browser
+           'AppData\Roaming\360se6\User Data\*\Last Session'                            # 360 Secure Browser
+           'AppData\Roaming\360se6\User Data\*\Last Tabs'                               # 360 Secure Browser
            'AppData\Local\WaveBrowser\User Data\*\Sessions\*'                           # Wave Browser
+           'AppData\Local\WaveBrowser\User Data\*\Current Session'                      # Wave Browser
+           'AppData\Local\WaveBrowser\User Data\*\Current Tabs'                         # Wave Browser
+           'AppData\Local\WaveBrowser\User Data\*\Last Session'                         # Wave Browser
+           'AppData\Local\WaveBrowser\User Data\*\Last Tabs'                            # Wave Browser
            'AppData\Local\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Sessions\*' # Prisma Access Browser
+           'AppData\Local\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Current Session' # Prisma Access Browser
+           'AppData\Local\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Current Tabs'    # Prisma Access Browser
+           'AppData\Local\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Last Session'    # Prisma Access Browser
+           'AppData\Local\Palo Alto Networks\PrismaAccessBrowser\User Data\*\Last Tabs'       # Prisma Access Browser
            'AppData\Local\Supermium\User Data\*\Sessions\*'                             # Supermium
+           'AppData\Local\Supermium\User Data\*\Current Session'                        # Supermium
+           'AppData\Local\Supermium\User Data\*\Current Tabs'                           # Supermium
+           'AppData\Local\Supermium\User Data\*\Last Session'                           # Supermium
+           'AppData\Local\Supermium\User Data\*\Last Tabs'                              # Supermium
            'AppData\Roaming\Mozilla\Firefox\Profiles\*\sessionstore*'                   # Firefox
            'AppData\Roaming\Mozilla\Firefox\Profiles\*\sessionstore-backups\**\*'       # Firefox
            'AppData\Local\Microsoft\Internet Explorer\Recovery\**\*'                    # IE
            'AppData\Local\Microsoft\Internet Explorer\TabRoaming\**\*'                  # IE
+           'Local Settings\Application Data\Google\Chrome\User Data\*\Current Session'      # XP: Chrome
+           'Local Settings\Application Data\Google\Chrome\User Data\*\Current Tabs'         # XP: Chrome
+           'Local Settings\Application Data\Google\Chrome\User Data\*\Last Session'         # XP: Chrome
+           'Local Settings\Application Data\Google\Chrome\User Data\*\Last Tabs'            # XP: Chrome
            'Application Data\Supermium\User Data\*\Sessions\*'                          # XP: Supermium
            'Application Data\Mozilla\Firefox\Profiles\*\sessionstore*'                  # XP: Firefox
            'Local Settings\Application Data\Microsoft\Internet Explorer\Recovery\**\*'  # XP: IE
        ) }
+    # Web storage: sites' local storage (Chromium's LevelDB, IE's DOMStore).
+    @{ Name = 'Browser Web Storage'; Group = 3; PresentByDefault = @(@{ Lineage = 'client'; From = '6.1' } <# Windows 7 on #>, @{ Lineage = 'server'; From = '6.0' } <# Windows Server 2008 on #>); CountBy = 'Folder'
+       User = @(
+           'AppData\Local\Microsoft\Edge\User Data\*\Local Storage\leveldb\**\*'            # Edge
+           'AppData\Local\Microsoft\Edge Beta\User Data\*\Local Storage\leveldb\**\*'       # Edge Beta
+           'AppData\Local\Microsoft\Edge Dev\User Data\*\Local Storage\leveldb\**\*'        # Edge Dev
+           'AppData\Local\Microsoft\Edge SxS\User Data\*\Local Storage\leveldb\**\*'        # Edge Canary
+           'AppData\Local\Google\Chrome\User Data\*\Local Storage\**\*'                     # Chrome
+           'AppData\Local\Google\Chrome Beta\User Data\*\Local Storage\leveldb\**\*'        # Chrome Beta
+           'AppData\Local\Google\Chrome Dev\User Data\*\Local Storage\leveldb\**\*'         # Chrome Dev
+           'AppData\Local\Google\Chrome SxS\User Data\*\Local Storage\leveldb\**\*'         # Chrome Canary
+           'AppData\Local\Chromium\User Data\*\Local Storage\leveldb\**\*'                  # Chromium
+           'AppData\Local\Microsoft\Internet Explorer\DOMStore\**\*'                        # IE
+           'AppData\LocalLow\Microsoft\Internet Explorer\DOMStore\**\*'                     # IE
+           'Local Settings\Application Data\Microsoft\Internet Explorer\DOMStore\**\*'      # XP: IE
+       ) }
+    # Credential Manager's vault: the credentials Windows keeps for a user (web and
+    # Windows credentials), each file with its own times.
+    @{ Name = 'Credential Manager'; Group = 3; User = 'AppData\Local\Microsoft\Vault\*\*.vcrd' }
     # File History catalogs (Catalog1/2.edb): metadata about backed-up files, not
     # the files themselves; only present when File History is enabled.
-    @{ Name = 'File History Catalogs'; Group = 3; ExpectMissing = @(@{ When = { $true }; Why = $gapReasons.OffByDefault }); User = 'AppData\Local\Microsoft\Windows\FileHistory\Configuration\Catalog*.edb' }
-    @{ Name = 'JumpLists'; Group = 3; User = @(
+    @{ Name = 'File History Catalogs'; Group = 3; User = 'AppData\Local\Microsoft\Windows\FileHistory\Configuration\Catalog*.edb' }
+    @{ Name = 'JumpLists'; Group = 3; PresentByDefault = @(@{ Lineage = 'client'; From = '6.1' } <# Windows 7 on #>); AbsentByDefault = @(@{ Lineage = 'client'; Before = '6.1'; Why = $gapReasons.WindowsVersion } <# client releases before Windows 7 #>); User = @(
         'AppData\Roaming\Microsoft\Windows\Recent\AutomaticDestinations\*.automaticDestinations-ms'
         'AppData\Roaming\Microsoft\Windows\Recent\CustomDestinations\*.customDestinations-ms'
     ) }
     # Shortcuts: recent files, Office recent, desktop and Start Menu (top level only).
-    @{ Name = 'LNK'; Group = 3
+    @{ Name = 'LNK'; Group = 3; PresentByDefault = @(@{ Lineage = 'client'; From = '5.1' } <# Windows XP on #>)
        System = @(
            'ProgramData\Microsoft\Windows\Start Menu\Programs\*.lnk'
            'System Volume Information\_restore*\RP*\*.lnk'               # XP restore points
@@ -611,7 +819,7 @@ $artefacts = @(
     # files or the synced files; its ETW traces are OneDrive ETL Traces.
     # OneDrive's ETW traces (.etl) of Windows 8.1's built-in client.
     @{ Name = 'OneDrive ETL Traces'; Group = 3; User = 'AppData\Local\Microsoft\Windows\SkyDrive\logs\*.etl' }
-    @{ Name = 'OneDrive Metadata'; Group = 3; ExpectMissing = @(@{ When = { $hostInfo.Server }; Why = $gapReasons.Server }); User = @(
+    @{ Name = 'OneDrive Metadata'; Group = 3; User = @(
         'AppData\Local\Microsoft\OneDrive\settings\**\*'
         'AppData\Local\Microsoft\OneDrive\logs\**\*.odl*'
         'AppData\Local\Microsoft\OneDrive\logs\**\*.aodl'
@@ -650,14 +858,14 @@ $artefacts = @(
            @{ Key = 'HKLM:\SOFTWARE\Policies\Microsoft\PowerShellCore\Transcription';     Value = 'OutputDirectory'; Pattern = '**\PowerShell_transcript.*.txt' }
        ) }
     # Recycle Bin metadata only ($I records; INFO2 on XP), no deleted-file content.
-    @{ Name = 'Recycle Bin'; Group = 3; Drives = 'All'; System = @(
+    @{ Name = 'Recycle Bin'; Group = 3; PresentByDefault = @(@{ Lineage = 'client'; From = '5.0'; Before = '10.0.26100' } <# Windows 2000 Professional to before Windows 11 24H2 #>, @{ Lineage = 'server'; From = '5.0' } <# Windows 2000 Server on #>); Drives = 'All'; System = @(
         '$Recycle.Bin\*\$I*'
         '$Recycle.Bin\$I*'                                               # FAT/exFAT: no per-SID folders
         'RECYCLE*\**\INFO2'                                              # XP (RECYCLER / RECYCLED)
     ) }
     # User hives, plus the service accounts' hives: DEFAULT is the SYSTEM account's
     # (HKU\.DEFAULT / S-1-5-18), the others LocalService and NetworkService.
-    @{ Name = 'Registry Hives (user)'; Group = 3; ExpectPresent = { $true }; ExpectLocked = { <# logged-on users' and service hives #> $true }; TransactionLogs = $true; FollowUp = 'User'   # users' hives, not the built-in service accounts'
+    @{ Name = 'Registry Hives (user)'; Group = 3; PresentByDefault = @(@{ Lineage = 'client'; From = '4.0' } <# Windows NT 4.0 Workstation on #>, @{ Lineage = 'server'; From = '4.0' } <# Windows NT 4.0 Server on #>); ExpectLocked = { <# logged-on users' and service hives #> $true }; TransactionLogs = $true; FollowUp = 'User'   # users' hives, not the built-in service accounts'
        System = @(
            'Windows\System32\config\DEFAULT'
            'Windows\System32\config\systemprofile\NTUSER.DAT'
@@ -682,15 +890,16 @@ $artefacts = @(
         'AppData\Local\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\Logs\*'
         'AppData\Local\Packages\MicrosoftTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\Logs\*'
         'AppData\Roaming\Microsoft\Teams\logs.txt'                              # classic Teams
+        'AppData\Roaming\Microsoft\Teams\old_logs_*.txt'                        # classic Teams
     ) }
     # Explorer's thumbnail cache index only, not the cached thumbnails (content).
-    @{ Name = 'Thumbcache'; Group = 3; User = 'AppData\Local\Microsoft\Windows\Explorer\thumbcache_idx.db' }
+    @{ Name = 'Thumbcache'; Group = 3; PresentByDefault = @(@{ Lineage = 'client'; From = '6.0' } <# Windows Vista on #>); User = 'AppData\Local\Microsoft\Windows\Explorer\thumbcache_idx.db' }
     # WER: only the .wer report metadata, never the crash dumps (bulk binary content).
     @{ Name = 'WER'; Group = 3
        System = 'ProgramData\Microsoft\Windows\WER\**\*.wer'
        User   = 'AppData\Local\Microsoft\Windows\WER\**\*.wer' }
     # Windows Timeline's activity database.
-    @{ Name = 'Windows Timeline'; Group = 3; User = 'AppData\Local\ConnectedDevicesPlatform\**\ActivitiesCache.db*' }
+    @{ Name = 'Windows Timeline'; Group = 3; PresentByDefault = @(@{ Lineage = 'client'; From = '10.0.17134'; Before = '10.0.22000' } <# Windows 10 1803 to before Windows 11 21H2 #>); User = 'AppData\Local\ConnectedDevicesPlatform\**\ActivitiesCache.db*' }
 )
 
 # The columns of collection.csv, one row per file the run attempted and one per
@@ -1098,26 +1307,39 @@ function Get-RegistryValue {
 # come from CIM (Win32_OperatingSystem's caption is right for Windows 11) and
 # the release (e.g. 23H2) from the registry; if CIM fails, the registry alone,
 # correcting its ProductName, which still says "Windows 10" on Windows 11.
-# Decisions use the build number and the server/workstation type, never the
-# name, which is localised. A fact that can't be determined stays $null, and
-# conditions treat $null as "not expected".
+# Decisions use the OS version (NtVersion: 6.1.7601, 10.0.19045), the build and
+# the lineage (client for a workstation, server for a server or domain
+# controller), never the name, which is localised. A fact that can't be
+# determined stays $null, and conditions treat $null as "not expected".
 function Get-HostInfo {
     $currentVersionKey = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion'
-    $info = @{ Caption = $null; Version = $null; Build = $null; Server = $null; DomainJoined = $null }
+    $info = @{ Caption = $null; Version = $null; Build = $null; NtVersion = $null; Lineage = $null; DomainController = $null }
     try {
         $operatingSystem = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
-        $info.Caption = $operatingSystem.Caption.Trim()
-        $info.Build   = [int]$operatingSystem.BuildNumber
-        $info.Server  = ($operatingSystem.ProductType -ne 1)   # 1 = workstation, 2 = DC, 3 = server
+        # ProductType 1 workstation, 2 domain controller, 3 server; any other
+        # value leaves the lineage unknown (the registry below may still give it).
+        $productType = $operatingSystem.ProductType
+        if ($productType -eq 1)     { $info.Lineage = 'client'; $info.DomainController = $false }
+        elseif ($productType -eq 2) { $info.Lineage = 'server'; $info.DomainController = $true }
+        elseif ($productType -eq 3) { $info.Lineage = 'server'; $info.DomainController = $false }
+        $info.Build            = [int]$operatingSystem.BuildNumber
+        $info.NtVersion        = [version]$operatingSystem.Version
+        $info.Caption          = $operatingSystem.Caption.Trim()   # last: an empty Caption throws, the facts above stand
     } catch {}   # no CIM: the registry below
-    try {
-        $info.DomainJoined = [bool](Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop).PartOfDomain
-    } catch {}   # stays unknown
     try {
         $currentVersion = Get-ItemProperty -LiteralPath $currentVersionKey -ErrorAction Stop
         $info.Version = if ($currentVersion.DisplayVersion) { $currentVersion.DisplayVersion } else { $currentVersion.ReleaseId }
         if (-not $info.Build) { $info.Build = [int]$currentVersion.CurrentBuild }
-        if ($null -eq $info.Server -and $currentVersion.InstallationType) { $info.Server = ($currentVersion.InstallationType -notlike 'Client*') }
+        if ($null -eq $info.NtVersion -and $currentVersion.CurrentBuild) {
+            # CurrentMajorVersionNumber from Windows 10 on; CurrentVersion (6.1) before.
+            $majorMinor = if ($null -ne $currentVersion.CurrentMajorVersionNumber) { "$($currentVersion.CurrentMajorVersionNumber).$($currentVersion.CurrentMinorVersionNumber)" } else { $currentVersion.CurrentVersion }
+            $info.NtVersion = [version]"$majorMinor.$($currentVersion.CurrentBuild)"
+        }
+        if ($null -eq $info.Lineage) {
+            # InstallationType Client, Server or Server Core; any other value leaves it unknown.
+            if ($currentVersion.InstallationType -like 'Client*')     { $info.Lineage = 'client' }
+            elseif ($currentVersion.InstallationType -like 'Server*') { $info.Lineage = 'server' }
+        }
         if (-not $info.Caption -and $currentVersion.ProductName) {
             $info.Caption = $currentVersion.ProductName
             if ($info.Build -ge 22000) { $info.Caption = $info.Caption -replace 'Windows 10', 'Windows 11' }
@@ -1137,11 +1359,33 @@ function Test-HostCondition {
     try { return [bool](& $Condition) } catch { return $false }
 }
 
-# The Why of the first ExpectMissing rule whose When holds, or $null if none does.
-function Get-ExpectedMissingReason {
-    param($Rules)
-    foreach ($rule in @($Rules)) {
-        if ($rule -and (Test-HostCondition -Condition $rule.When)) { return $rule.Why }
+# Whether a row's pattern also takes its matches' registry transaction logs
+# (<file>.LOG*): every pattern of a row with TransactionLogs = $true, or, with a
+# list of file-name patterns, those whose last segment matches one (-like).
+function Test-TransactionLogPattern {
+    param($Artefact, [string]$Pattern)
+    $transactionLogs = $Artefact.TransactionLogs
+    if ($null -eq $transactionLogs) { return $false }
+    if ($transactionLogs -is [bool]) { return $transactionLogs }
+    $lastSegment = ($Pattern -split '\\')[-1]
+    foreach ($fileNamePattern in $transactionLogs) {
+        if ($lastSegment -like $fileNamePattern) { return $true }
+    }
+    return $false
+}
+
+# The first of a row's spans (PresentByDefault or AbsentByDefault) that holds
+# for this host: its lineage, and its OS version at or after From and before
+# Before (a bound left out is none). $null if none does, or if the host's
+# version or lineage is not known.
+function Find-HostSpan {
+    param($Spans)
+    if ($null -eq $hostInfo.NtVersion -or $null -eq $hostInfo.Lineage) { return $null }
+    foreach ($span in $Spans) {
+        if ($span.Lineage -ne $hostInfo.Lineage) { continue }
+        if ($span.From -and $hostInfo.NtVersion -lt [version]$span.From) { continue }
+        if ($span.Before -and $hostInfo.NtVersion -ge [version]$span.Before) { continue }
+        return $span
     }
     return $null
 }
@@ -1575,7 +1819,7 @@ function Add-ArtefactToZip {
         try {
             # The hive first, then its transaction logs (marked, so the follow-ups skip them).
             $patterns = @(@{ Text = $source.Pattern; IsTransactionLog = $false })
-            if ($Artefact.TransactionLogs) { $patterns += @{ Text = ($source.Pattern + '.LOG*'); IsTransactionLog = $true } }
+            if (Test-TransactionLogPattern -Artefact $Artefact -Pattern $source.Pattern) { $patterns += @{ Text = ($source.Pattern + '.LOG*'); IsTransactionLog = $true } }
             foreach ($pattern in $patterns) {
                 $matchedFiles = @(Resolve-PathPattern -Root $source.Root -Pattern $pattern.Text -Literal:([bool]$Artefact.Literal) -FoldersNotListed $foldersNotListed)
                 foreach ($matchedFile in $matchedFiles) {
@@ -1680,9 +1924,9 @@ function Add-ArtefactToZip {
 
     $status = Format-SummaryStatus @tally
     $note   = ''
-    $missingReason = if ($status -eq 'Missing') { Get-ExpectedMissingReason -Rules $Artefact.ExpectMissing } else { $null }
-    if ($missingReason) {
-        $note = "($missingReason)"
+    $absentSpan = if ($status -eq 'Missing') { Find-HostSpan -Spans $Artefact.AbsentByDefault } else { $null }
+    if ($null -ne $absentSpan) {
+        $note = "($($absentSpan.Why))"
     } elseif ($status -like '*not accessible*' -and $failuresExplainedByLock -gt 0 -and $failuresNotExplainedByLock -eq 0 -and (Test-HostCondition -Condition $Artefact.ExpectLocked)) {
         $requires = if ($Artefact.Requires) { $Artefact.Requires } else { 'NTFS parser' }
         $note = "(requires $requires)"
@@ -1694,7 +1938,7 @@ function Add-ArtefactToZip {
     # summary but not warned about.
     $isUnusualGap = ($unlistedFolderCount -gt 0 -or $partialCopyCount -gt 0 -or
         (-not $note -and (($status -like '*not accessible*') -or
-                          ($status -eq 'Missing' -and (Test-HostCondition -Condition $Artefact.ExpectPresent)))))
+                          ($status -eq 'Missing' -and $null -ne (Find-HostSpan -Spans $Artefact.PresentByDefault)))))
     # The run stopped in this row to keep the free-space reserve: the rest of
     # it wasn't attempted, which the note and the record say. With nothing
     # counted before the stop, the row reads Not collected (not Missing).
@@ -2360,7 +2604,7 @@ try {
 } catch {
     Add-CollectorWarning -Message 'The running account could not be determined.'
 }
-if ($null -eq $hostInfo.Build -or $null -eq $hostInfo.Server) {
+if ($null -eq $hostInfo.NtVersion -or $null -eq $hostInfo.Lineage -or ($hostInfo.Lineage -eq 'server' -and $null -eq $hostInfo.DomainController)) {
     Add-CollectorWarning -Message "Host details could not be fully determined: summary notes and missing-artefact warnings may be incomplete."
 } elseif (-not $hostInfo.Caption) {
     Add-CollectorWarning -Message 'The OS name could not be determined; the build and the host type, which the summary notes use, could.'

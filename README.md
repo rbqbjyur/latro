@@ -54,23 +54,26 @@ A run in a Live Response session (Windows 11 Enterprise 24H2, as SYSTEM).
 
 ## What it does
 
-- **Collects 43 timeline-relevant artefacts** in one run, and lists `$MFT`
-  for `getfile` (47 summary lines with the other three NTFS metafiles): event
+- **Collects 50 timeline-relevant artefacts** in one run, and lists `$MFT`
+  for `getfile` (54 summary lines with the other three NTFS metafiles): event
   logs and event trace logs, Prefetch, Amcache and PCA,
   registry hives, SRUM, BITS, scheduled tasks, LNK files and JumpLists, the
-  thumbnail cache index, the shadow copy catalogue, browser history for every
-  maintained browser and, for most of them, bookmarks, cookies, sessions and
-  preferences, Recycle Bin `$I` records, PowerShell history and transcripts,
-  Defender, OneDrive, Teams, Configuration Manager and MSRT logs, the DHCP,
-  DNS, IIS, SQL Server and Exchange Server logs on hosts that run them, and
-  more
+  thumbnail cache index, the Windows Search index, the shadow copy
+  catalogue, INF files, Credential Manager's vault, browser history for every
+  maintained browser and, for most of them, bookmarks, cookies, form data,
+  sessions and preferences, Recycle Bin `$I` records, PowerShell history and
+  transcripts, Defender, OneDrive, Teams, Configuration Manager and MSRT
+  logs, the DHCP, DNS, IIS, SQL Server and Exchange Server logs on hosts that
+  run them, a domain controller's `ntds.dit`, and more
   ([What it collects](#what-it-collects)).
 - **Timeline value first.** Artefacts are chosen for timestamped evidence of
   execution, file access, persistence, device use, browsing and command-line
-  activity. Microsoft's and browsers' sources only; metadata over content
-  (`$I` records, not the deleted `$R` files; `.wer` reports, not memory
-  dumps; the thumbnail cache index, not the thumbnails; browser history, not
-  caches).
+  activity. Microsoft's and browsers' sources only, and records rather than
+  payload: records are entries a parser reads one at a time, each an action
+  or a state; payload, here, is an object opened whole by its own
+  application, which a timeline shows only by its file's times (`$I`
+  records, not the deleted `$R` files; `.wer` reports, not memory dumps; the
+  thumbnail cache index, not the thumbnails; browser history, not caches).
 - **Legacy forms included.** Older-Windows forms of each artefact (e.g. `.evt`,
   `RecentFileCache.bcf`, XP profile paths) and the previous install kept in
   `Windows.old` are collected as part of the same artefact.
@@ -163,7 +166,7 @@ run log's path) and `Drives` (the drives searched). `OS` reads `not
 determined` (with the build, where it is known) when the OS name can't be
 read, with a warning; `Log` is left out when there is no run log. Next come the Warnings
 known by then (`none` when there are none) and one progress line per artefact,
-`[01/47] Collecting $LogFile` to `[47/47] Collecting Windows Timeline`. The
+`[01/54] Collecting $LogFile` to `[54/54] Collecting Windows Timeline`. The
 end of the run is under [Reading the summary](#reading-the-summary).
 
 ## What it collects
@@ -204,7 +207,7 @@ summary are covered under [What it can't collect](#what-it-cant-collect).
 
 | Artefact | Location |
 |---|---|
-| Application Compatibility | `%SystemRoot%\AppCompat\Programs\Amcache.hve`<br>`%SystemRoot%\appcompat\pca\*` (Windows 11 22H2+)<br>`%SystemRoot%\AppCompat\Programs\RecentFileCache.bcf` (Windows 7)<br>`%SystemDrive%\System Volume Information\Syscache.hve` (Windows 7 / Server 2008 R2)<br>`%SystemDrive%\Windows.old\Windows\AppCompat\Programs\{Amcache.hve,RecentFileCache.bcf}`<br>hives with their `.LOG`/`.LOG1`/`.LOG2` |
+| Application Compatibility | `%SystemRoot%\AppCompat\Programs\Amcache.hve`<br>`%SystemRoot%\appcompat\pca\*` (Windows 11 22H2+)<br>`%SystemRoot%\AppCompat\Programs\Inventory*.db` (Windows 11; seen on 25H2 and 26H2)<br>`%SystemRoot%\AppCompat\Programs\RecentFileCache.bcf` (Windows 7)<br>`%SystemDrive%\System Volume Information\Syscache.hve` (Windows 7 / Server 2008 R2)<br>`%SystemDrive%\Windows.old\Windows\AppCompat\Programs\{Amcache.hve,RecentFileCache.bcf}`<br>the hives and `RecentFileCache.bcf` with their `.LOG`/`.LOG1`/`.LOG2` |
 | BITS | `%ProgramData%\Microsoft\Network\Downloader\` (recursive) |
 | Defender Logs | `%ProgramData%\Microsoft\Windows Defender\Support\` (recursive)<br>`%ProgramData%\Microsoft\Windows Defender\Scans\History\Service\DetectionHistory\` (recursive)<br>`%ProgramData%\Microsoft\Windows Defender\Scans\History\Service\Detections.log`<br>`%SystemRoot%\Temp\MpCmdRun.log`<br>`%ProgramData%\Microsoft\Microsoft AntiMalware\Support\` (recursive; older Defender / SCEP)<br>`%SystemDrive%\Windows.old\Windows\Temp\MpCmdRun.log` |
 | DHCP Server Logs | `%SystemRoot%\System32\dhcp\DhcpSrvLog-*.log` (DHCP Server role, with its audit logging on) |
@@ -215,7 +218,9 @@ summary are covered under [What it can't collect](#what-it-cant-collect).
 | Firewall Log | `%SystemRoot%\System32\LogFiles\Firewall\pfirewall.*`<br>`%SystemDrive%\Windows.old\Windows\System32\LogFiles\Firewall\pfirewall.*` |
 | Group Policy | `%SystemRoot%\System32\GroupPolicy\` (recursive)<br>`%ProgramData%\Microsoft\Group Policy\History\` (recursive; cached domain GPOs)<br>`%UserProfile%\AppData\Local\Microsoft\Group Policy\History\` (recursive)<br>`%SystemDrive%\Windows.old\Windows\System32\GroupPolicy\` `*.ini`, `*.pol` and `*\Scripts\` (recursive) |
 | IIS Logs | `%SystemDrive%\inetpub\logs\LogFiles\*.log` and its site folders (recursive, `*.log`)<br>`%SystemRoot%\System32\LogFiles\HTTPERR\*.log` (HTTP.sys)<br>`%SystemRoot%\System32\LogFiles\W3SVC*\*.log`<br>`%SystemDrive%\Windows.old\Windows\System32\LogFiles\W3SVC*\*.log` |
+| INF files | `%SystemRoot%\INF\*.inf` |
 | MSRT Log | `%SystemRoot%\debug\mrt.log` |
+| NTDS | `%SystemRoot%\NTDS\ntds.dit` (domain controllers) |
 | Prefetch | `%SystemRoot%\Prefetch\*.pf`<br>`%SystemDrive%\Windows.old\Windows\Prefetch\*.pf` |
 | Registry Hives (system) | `%SystemRoot%\System32\config\{SAM,SECURITY,SOFTWARE,SYSTEM,COMPONENTS,ELAM}`<br>`%SystemRoot%\System32\AppLocker\AppCache.dat`<br>`%SystemRoot%\System32\config\RegBack\{SAM,SECURITY,SOFTWARE,SYSTEM,SYSTEM1}`<br>`%SystemDrive%\System Volume Information\_restore*\RP*\snapshot\_REGISTRY_*` (XP restore points)<br>`%SystemDrive%\Windows.old\Windows\System32\config\{SAM,SECURITY,SOFTWARE,SYSTEM}` and `...\config\RegBack\`, the same RegBack hives<br>each with its `.LOG`/`.LOG1`/`.LOG2` |
 | Restore Point Logs | `%SystemDrive%\System Volume Information\_restore*\RP*\rp.log` (XP) |
@@ -226,12 +231,17 @@ summary are covered under [What it can't collect](#what-it-cant-collect).
 | SQL Server Logs | `%SystemDrive%\{Program Files,Program Files (x86)}\Microsoft SQL Server\*\MSSQL\LOG\ERRORLOG*` |
 | SRUM | `%SystemRoot%\System32\SRU\` (recursive: `SRUDB.dat` and its ESE logs)<br>`%SystemDrive%\Windows.old\Windows\System32\SRU\` (recursive) |
 | User Access Logging (SUM) | `%SystemRoot%\System32\LogFiles\Sum\` (recursive; Windows Server) |
+| Windows Search index | `%ProgramData%\Microsoft\Search\Data\Applications\Windows\Windows.edb`, with `edb.chk`, `edb*.log` and `edbres*.jrs` beside it<br>`%ProgramData%\Microsoft\Search\Data\Applications\Windows\{Windows,Windows-gather}.db`, each with its `-wal` |
 | Browser Bookmarks | `%UserProfile%\AppData\Local\Microsoft\Edge{, Beta, Dev, SxS}\User Data\<profile>\Bookmarks*`<br>`%UserProfile%\AppData\Local\Google\Chrome{, Beta, Dev, SxS}\User Data\<profile>\Bookmarks*`<br>`Spartan.edb` under `%UserProfile%\AppData\Local\Packages\Microsoft.MicrosoftEdge_*\` (legacy Edge)<br>The equivalent paths for Chromium, Brave, Vivaldi, Yandex, Arc, Coc Coc, QQ Browser, UC Browser, Wave, Prisma Access Browser and Supermium, with their XP forms: the Browser Bookmarks row of `$artefacts` in [collector.ps1](collector.ps1) |
-| Browser Cookies | `%UserProfile%\AppData\Local\Google\Chrome{, Beta, Dev, SxS}\User Data\<profile>\Cookies*`<br>`%UserProfile%\AppData\Roaming\Mozilla\Firefox\Profiles\*\cookies.sqlite*`<br>`%UserProfile%\AppData\Roaming\Microsoft\Windows\Cookies\` (recursive; IE)<br>The equivalent paths for Chromium, Brave, Vivaldi, Yandex, Coc Coc, QQ Browser, UC Browser, 360 Secure Browser, Wave, Prisma Access Browser and Supermium, with their XP forms: the Browser Cookies row of `$artefacts` in [collector.ps1](collector.ps1)<br>Not collected: Edge's, Arc's and Opera's cookies, and `<profile>\Network\Cookies*` |
-| Browser Extensions | `%UserProfile%\AppData\Roaming\Mozilla\Firefox\Profiles\*\extensions.json` (Firefox) |
+| Browser Cookies | `%UserProfile%\AppData\Local\Microsoft\Edge{, Beta, Dev, SxS}\User Data\<profile>\Network\Cookies*`<br>`%UserProfile%\AppData\Local\Google\Chrome{, Beta, Dev, SxS}\User Data\<profile>\Cookies*`, and `Network\Cookies*` for Chrome's stable channel<br>`%UserProfile%\AppData\Roaming\Mozilla\Firefox\Profiles\*\cookies.sqlite*`<br>`%UserProfile%\AppData\Roaming\Microsoft\Windows\Cookies\` (recursive; IE)<br>The equivalent paths for Chromium, Brave, Vivaldi, Yandex, Arc (`Network\Cookies*`), Coc Coc, QQ Browser, UC Browser, 360 Secure Browser, Wave, Prisma Access Browser and Supermium, with their XP forms: the Browser Cookies row of `$artefacts` in [collector.ps1](collector.ps1)<br>Not collected: Opera's cookies, and `<profile>\Network\Cookies*` of browsers other than Edge, Chrome's stable channel and Arc |
+| Browser Extensions | `%UserProfile%\AppData\Local\Google\Chrome\User Data\<profile>\Extension Activity` (Chrome)<br>`%UserProfile%\AppData\Roaming\Mozilla\Firefox\Profiles\*\{extensions.json,addons.sqlite*}` (Firefox)<br>`%UserProfile%\Application Data\Mozilla\Firefox\Profiles\*\addons.sqlite*` (XP) |
+| Browser Form Data | `%UserProfile%\AppData\Local\Microsoft\Edge{, Beta, Dev, SxS}\User Data\<profile>\Web Data*`<br>`%UserProfile%\AppData\Local\Google\Chrome{, Beta, Dev, SxS}\User Data\<profile>\Web Data*`<br>`%UserProfile%\AppData\Roaming\Mozilla\Firefox\Profiles\*\formhistory.sqlite*`<br>The equivalent paths for Chromium, Brave, Vivaldi, Yandex, Arc, Coc Coc, QQ Browser, UC Browser, 360 Secure Browser, Wave, Prisma Access Browser and Supermium, with their XP forms: the Browser Form Data row of `$artefacts` in [collector.ps1](collector.ps1) |
 | Browser History | `%UserProfile%\AppData\Local\Microsoft\Edge{, Beta, Dev, SxS}\User Data\<profile>\{History*,Shortcuts*}`<br>`%UserProfile%\AppData\Local\Google\Chrome{, Beta, Dev, SxS}\User Data\<profile>\{History*,Shortcuts*}`, and `Archived History*` for Chrome's stable channel<br>`%UserProfile%\AppData\Local\Chromium\User Data\<profile>\{History*,Shortcuts*}`<br>`%SystemRoot%\System32\config\systemprofile\AppData\Local\` paths for Chrome (all channels), Chromium, Prisma Access Browser, Supermium and Wave<br>`%UserProfile%\AppData\Local\Microsoft\Windows\WebCache\*` (IE 10/11, legacy Edge)<br>`index.dat` under `%UserProfile%\AppData\Local\Microsoft\Windows\History\` (recursive; IE 9 and earlier)<br>`%UserProfile%\AppData\Roaming\Microsoft\Windows\IEDownloadHistory\index.dat` (IE 9 downloads)<br>XP: `%UserProfile%\Local Settings\Application Data\` paths for Chrome (all channels) and Chromium; `index.dat` under `%UserProfile%\Local Settings\History\History.IE5\` (recursive)<br>The equivalent paths for Brave, Vivaldi, Opera, Yandex, Coc Coc, QQ Browser, UC Browser, 360 Secure Browser, Arc, Wave, Supermium, Prisma Access Browser, Firefox and Safari for Windows (`History.plist`, `Downloads.plist`), with their legacy and XP forms: the Browser History row of `$artefacts` in [collector.ps1](collector.ps1) |
-| Browser Preferences | `%UserProfile%\AppData\Local\Microsoft\Edge{, Beta, Dev, SxS}\User Data\<profile>\Preferences`<br>`%UserProfile%\AppData\Local\Google\Chrome{, Beta, Dev, SxS}\User Data\<profile>\Preferences`<br>`%UserProfile%\AppData\Roaming\Mozilla\Firefox\Profiles\*\prefs.js`<br>The equivalent paths for Chromium, Brave, Vivaldi, Yandex, Arc, Coc Coc, QQ Browser, UC Browser, 360 Secure Browser, Wave, Prisma Access Browser and Supermium, with their XP forms: the Browser Preferences row of `$artefacts` in [collector.ps1](collector.ps1) |
-| Browser Sessions | `%UserProfile%\AppData\Local\Microsoft\Edge{, Beta, Dev, SxS}\User Data\<profile>\Sessions\*`<br>`%UserProfile%\AppData\Local\Google\Chrome{, Beta, Dev, SxS}\User Data\<profile>\Sessions\*`<br>`%UserProfile%\AppData\Roaming\Mozilla\Firefox\Profiles\*\sessionstore*` and `...\sessionstore-backups\` (recursive)<br>`%UserProfile%\AppData\Local\Microsoft\Internet Explorer\{Recovery,TabRoaming}\` (recursive; IE)<br>The equivalent paths for Chromium, Brave (its Default profile only), Vivaldi, Yandex, Arc, Coc Coc, QQ Browser, UC Browser, 360 Secure Browser, Wave, Prisma Access Browser and Supermium, with their XP forms: the Browser Sessions row of `$artefacts` in [collector.ps1](collector.ps1) |
+| Browser Preferences | `%UserProfile%\AppData\Local\Microsoft\Edge{, Beta, Dev, SxS}\User Data\<profile>\{Preferences,Secure Preferences,Sync Data\SyncData.sqlite3}`<br>`%UserProfile%\AppData\Local\Google\Chrome{, Beta, Dev, SxS}\User Data\<profile>\{Preferences,Secure Preferences,Sync Data\SyncData.sqlite3}`<br>`%UserProfile%\AppData\Roaming\Mozilla\Firefox\Profiles\*\{prefs.js,signedinuser.json}`<br>The equivalent paths for Chromium, Brave, Vivaldi, Yandex, Arc, Coc Coc, QQ Browser, UC Browser, 360 Secure Browser, Wave, Prisma Access Browser and Supermium (not every file for every browser; the whole `Sync Data\` folder for some), with their XP forms: the Browser Preferences row of `$artefacts` in [collector.ps1](collector.ps1) |
+| Browser Saved Logins | `%UserProfile%\AppData\Local\BraveSoftware\Brave-Browser\User Data\<profile>\Login Data`<br>`%UserProfile%\AppData\Roaming\Mozilla\Firefox\Profiles\*\logins.json`<br>The equivalent paths for Vivaldi, Wave and Prisma Access Browser, and the XP forms for Chrome (all channels), Chromium, Prisma Access Browser and Firefox: the Browser Saved Logins row of `$artefacts` in [collector.ps1](collector.ps1)<br>Not collected: the `Login Data*` files of current Chrome (all channels), Chromium and Edge, and of browsers not named here (see [What it can't collect](#what-it-cant-collect)) |
+| Browser Sessions | `%UserProfile%\AppData\Local\Microsoft\Edge{, Beta, Dev, SxS}\User Data\<profile>\{Sessions\*,Current Session,Current Tabs,Last Session,Last Tabs}`<br>`%UserProfile%\AppData\Local\Google\Chrome{, Beta, Dev, SxS}\User Data\<profile>\{Sessions\*,Current Session,Current Tabs,Last Session,Last Tabs}`<br>`%UserProfile%\AppData\Roaming\Mozilla\Firefox\Profiles\*\sessionstore*` and `...\sessionstore-backups\` (recursive)<br>`%UserProfile%\AppData\Local\Microsoft\Internet Explorer\{Recovery,TabRoaming}\` (recursive; IE)<br>The equivalent paths for Chromium, Brave, Vivaldi, Yandex, Arc, Coc Coc, QQ Browser, UC Browser, 360 Secure Browser, Wave, Prisma Access Browser and Supermium (not every file for every browser), with their XP forms: the Browser Sessions row of `$artefacts` in [collector.ps1](collector.ps1) |
+| Browser Web Storage | `%UserProfile%\AppData\Local\Microsoft\Edge{, Beta, Dev, SxS}\User Data\<profile>\Local Storage\leveldb\` (recursive)<br>`%UserProfile%\AppData\Local\Google\Chrome{, Beta, Dev, SxS}\User Data\<profile>\Local Storage\leveldb\` (recursive), and the whole `Local Storage\` for Chrome's stable channel<br>`%UserProfile%\AppData\Local\Chromium\User Data\<profile>\Local Storage\leveldb\` (recursive)<br>`%UserProfile%\AppData\{Local,LocalLow}\Microsoft\Internet Explorer\DOMStore\` (recursive; IE)<br>`%UserProfile%\Local Settings\Application Data\Microsoft\Internet Explorer\DOMStore\` (recursive; XP) |
+| Credential Manager | `%UserProfile%\AppData\Local\Microsoft\Vault\*\*.vcrd` |
 | File History Catalogs | `%UserProfile%\AppData\Local\Microsoft\Windows\FileHistory\Configuration\Catalog*.edb` |
 | JumpLists | `%UserProfile%\AppData\Roaming\Microsoft\Windows\Recent\AutomaticDestinations\*.automaticDestinations-ms`<br>`%UserProfile%\AppData\Roaming\Microsoft\Windows\Recent\CustomDestinations\*.customDestinations-ms` |
 | LNK | `%UserProfile%\AppData\Roaming\Microsoft\Windows\Recent\*.lnk`<br>`%UserProfile%\AppData\Roaming\Microsoft\Office\Recent\` (recursive)<br>`%UserProfile%\Desktop\*.lnk`<br>`%UserProfile%\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\*.lnk`<br>`%ProgramData%\Microsoft\Windows\Start Menu\Programs\*.lnk`<br>`%UserProfile%\Recent\` (recursive; XP)<br>`%SystemDrive%\System Volume Information\_restore*\RP*\*.lnk` (XP restore points) |
@@ -239,11 +249,11 @@ summary are covered under [What it can't collect](#what-it-cant-collect).
 | OneDrive ETL Traces | `%UserProfile%\AppData\Local\Microsoft\Windows\SkyDrive\logs\*.etl` (Windows 8.1) |
 | OneDrive Metadata | `%UserProfile%\AppData\Local\Microsoft\OneDrive\settings\` (recursive)<br>`%UserProfile%\AppData\Local\Microsoft\OneDrive\logs\` (recursive: `*.odl*`, `*.aodl`, `*.loggz`, `*.keystore`; not the `.etlgz` traces), and `...\logs\Personal\SyncDiagnostics.log`<br>`%UserProfile%\AppData\Local\Microsoft\SkyDrive\logs\` (recursive; SkyDrive)<br>`%UserProfile%\AppData\Local\Microsoft\Windows\OneDrive\logs\` (recursive; Windows 8.1)<br>`%UserProfile%\AppData\Local\Microsoft\Windows\SkyDrive\logs\SyncDiagnostics.log` (Windows 8.1) |
 | PowerShell History | `%UserProfile%\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\*_history.txt`<br>`%SystemRoot%\{System32,SysWOW64}\config\systemprofile\AppData\Roaming\Microsoft\Windows\PowerShell\PSReadLine\*_history.txt` |
-| PowerShell Transcripts | `%UserProfile%\Documents\PowerShell_transcript.*.txt` and `%UserProfile%\Documents\20*\PowerShell_transcript.*.txt`<br>`%UserProfile%\OneDrive*\Documents\PowerShell_transcript.*.txt` and `...\Documents\20*\PowerShell_transcript.*.txt`<br>`%SystemRoot%\{System32,SysWOW64}\*\PowerShell_transcript.*.txt`<br>`%SystemDrive%\PSTranscript\20*\PowerShell_transcript.*.txt`<br>the policy transcription folder, if on a local drive (recursive) |
+| PowerShell Transcripts | `%UserProfile%\Documents\PowerShell_transcript.*.txt` and `%UserProfile%\Documents\20*\PowerShell_transcript.*.txt`<br>`%UserProfile%\OneDrive*\Documents\PowerShell_transcript.*.txt` and `...\Documents\20*\PowerShell_transcript.*.txt`<br>`%SystemRoot%\{System32,SysWOW64}\*\PowerShell_transcript.*.txt`<br>`%SystemDrive%\PSTranscript\20*\PowerShell_transcript.*.txt`<br>the machine-wide policy transcription folders of Windows PowerShell and PowerShell 7, if on a local drive (recursive) |
 | Recycle Bin | `<drive>\$Recycle.Bin\<SID>\$I*` on every local drive (FAT/exFAT: `<drive>\$Recycle.Bin\$I*`)<br>`INFO2` under `<drive>\RECYCLE*\` (recursive; XP `RECYCLER`/`RECYCLED`) |
 | Registry Hives (user) | `%UserProfile%\NTUSER.DAT`<br>`%UserProfile%\AppData\Local\Microsoft\Windows\UsrClass.dat`<br>`%UserProfile%\Local Settings\Application Data\Microsoft\Windows\UsrClass.dat` (XP)<br>`%SystemRoot%\System32\config\DEFAULT` (SYSTEM)<br>`%SystemRoot%\System32\config\systemprofile\NTUSER.DAT`<br>`%SystemRoot%\ServiceProfiles\{LocalService,NetworkService}\NTUSER.DAT`<br>`%SystemDrive%\Windows.old\Windows\`, the same four service-account hives<br>each with its `.LOG`/`.LOG1`/`.LOG2` |
 | Startup Folders | `%ProgramData%\Microsoft\Windows\Start Menu\Programs\StartUp\` (recursive)<br>`%UserProfile%\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\` (recursive) |
-| Teams Logs | `%UserProfile%\AppData\Local\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\Logs\*`<br>`%UserProfile%\AppData\Local\Packages\MicrosoftTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\Logs\*` (Windows 11 built-in Teams)<br>`%UserProfile%\AppData\Roaming\Microsoft\Teams\logs.txt` (classic Teams) |
+| Teams Logs | `%UserProfile%\AppData\Local\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\Logs\*`<br>`%UserProfile%\AppData\Local\Packages\MicrosoftTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\Logs\*` (Windows 11 built-in Teams)<br>`%UserProfile%\AppData\Roaming\Microsoft\Teams\{logs.txt,old_logs_*.txt}` (classic Teams) |
 | Thumbcache | `%UserProfile%\AppData\Local\Microsoft\Windows\Explorer\thumbcache_idx.db` (the index only, not the cached thumbnails) |
 | WER | `%ProgramData%\Microsoft\Windows\WER\` (recursive, `*.wer`)<br>`%UserProfile%\AppData\Local\Microsoft\Windows\WER\` (recursive, `*.wer`) |
 | Windows Timeline | `ActivitiesCache.db*` under `%UserProfile%\AppData\Local\ConnectedDevicesPlatform\` (recursive) |
@@ -274,6 +284,7 @@ ready-to-paste `getfile` command at the end.
 | `WebCacheV01.dat` of logged-on users | Usually held open in the user's session | NTFS parser | `getfile` manually (not printed) |
 | A running browser's current session files (Browser Sessions, e.g. Edge's `Sessions\Session_*` and `Tabs_*`) | Held by the running browser | NTFS parser | `getfile` manually (not printed) |
 | Internet Explorer's cookie `index.dat` (Browser Cookies) | Locked from boot | NTFS parser | `getfile` manually (not printed) |
+| `ntds.dit` (NTDS, domain controllers) | Held open while the domain controller runs | NTFS parser | `getfile` (printed; not tried on a domain controller) |
 
 Hives of users who are not logged on, and most other in-use files (EVTX, a
 running browser's History), are collected normally. If any other
@@ -284,6 +295,18 @@ The BCD store (`Boot\BCD`, `EFI\Microsoft\Boot\BCD` and
 `EFI\Microsoft\Recovery\BCD`, on the system partition) is not collected and
 has no summary line: the collector has no row for the system partition's
 files, and reads only drives with a letter.
+
+The collector looks for artefacts only at the paths under
+[What it collects](#what-it-collects): a location a setting names (a
+registry value, a policy) is not read or searched, for example the
+per-user transcription folder of PowerShell 7
+(its `PowerShellCore` policy) or SetupAPI's `LogPath`. The one exception:
+the machine-wide policy transcription folders of Windows PowerShell and
+PowerShell 7 are searched when on a local drive (PowerShell Transcripts).
+
+The `Login Data*` files of current Chrome, Chromium and Edge, and of the
+browsers Browser Saved Logins doesn't name, are not collected: whether
+they hold only records is not yet settled.
 
 ## How it works
 
@@ -394,8 +417,10 @@ separator; sizes are in binary units (KiB, MiB, GiB) with two decimals.
   not counted in the status.
 
 A note in its own column explains a gap that is normal for this host: for
-Missing, the reason (e.g. "normal for Windows Server" for Prefetch, "not on
-this Windows version" for legacy-only artefacts); for files that are normally
+Missing, the reason, where the artefact is absent by default on this
+Windows release and role ("off by default" for the Firewall Log, "Windows
+Server only" for User Access Logging on a workstation, "not on this Windows
+version" for JumpLists before Windows 7); for files that are normally
 locked, **(requires NTFS parser)** (see
 [What it can't collect](#what-it-cant-collect)), only when at least one file
 failed the way that lock does (held by another process; for the NTFS
@@ -403,14 +428,20 @@ metafiles and the shadow copy catalogue, access denied) and every file that
 couldn't be opened did. Any other failure, such as a
 file gone before it was opened or access denied to an account other than
 SYSTEM, leaves the gap unexplained, under Warnings. A Missing status without
-a note is listed under Warnings only if the artefact should exist on this
-host (e.g. event logs, or Prefetch on a workstation); many artefacts may
-simply be absent (e.g. PowerShell transcripts) and are not warned about. A
+a note is listed under Warnings only where the artefact is present by
+default on this Windows release and role, client or server (e.g. event
+logs, Prefetch on Windows 8 and later workstations, SRUM on Windows Server
+2019 and later); many artefacts may simply be absent (e.g. PowerShell
+transcripts) and are not warned about, nor is any artefact when the
+Windows version or role can't be read. A
 folder that couldn't be listed, or a copy that failed part-way, always puts
 its artefact under Warnings, whatever its note.
 
-Browser Bookmarks, Cookies, Extensions, History and Preferences count browser
-profiles, not files (Browser Sessions counts files); a profile counts as
+Browser Bookmarks, Cookies, Extensions, Form Data, History, Preferences,
+Saved Logins and Web Storage count folders, not files (Browser Sessions
+counts files): mostly one per browser profile, but a profile's `Network\`
+and `Sync Data\` folders count on their own, so a profile with files both
+there and in the profile folder counts twice. A folder counts as
 collected only if every main file in it was read, e.g. its history
 database and `Shortcuts` (a locked history database with
 readable journal or logs is *Not accessible*). Empty files are not counted:
@@ -426,7 +457,7 @@ are not counted either.
   </tr>
 </table>
 
-![Notepad: the run log beside the zip - latro and its version, the header fields (the UTC start time, the host, the OS, the run log's path and the drives searched), the Warnings section and the 47 progress lines, one per artefact](docs/images/run-log.webp)
+![Notepad: the run log beside the zip - latro and its version, the header fields (the UTC start time, the host, the OS, the run log's path and the drives searched), the Warnings section and the first 48 of its 54 progress lines, one per artefact](docs/images/run-log.webp)
 
 The zip in Explorer, from a test machine run before 2.3.0, and the run log
 in Notepad, from 2.3.0 (an elevated run, so its one warning).
@@ -468,7 +499,7 @@ in Notepad, from 2.3.0 (an elevated run, so its one warning).
 - No following of links: folder links and file symbolic links are skipped,
   and not recorded.
 - No third-party application artefacts beyond browsers', and no browser
-  caches or saved passwords.
+  caches.
 - No cleanup: the output stays in its folder until you remove it.
 - No time-limit handling: a run that reaches Live Response's 30-minute limit
   is cut off by Live Response.

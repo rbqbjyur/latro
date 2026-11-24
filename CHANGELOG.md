@@ -4,6 +4,82 @@ Notable changes to `collector.ps1`. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 2.4.0 - 2026-11-24
+
+### Added
+- Browser Form Data: form entries from most Chromium-family browsers'
+  `Web Data` and Firefox's `formhistory.sqlite`, counted per browser
+  profile.
+- Browser Saved Logins: `Login Data` (Brave, Vivaldi, Wave Browser, Prisma
+  Access Browser; Chrome and Chromium in XP profiles) and Firefox's
+  `logins.json`, counted per browser profile. Other Chromium-family
+  browsers' `Login Data`, Chrome's and Edge's current profiles included, is
+  not taken.
+- Browser Web Storage: sites' local storage (`Local Storage` of Edge,
+  Chrome and Chromium; Internet Explorer's `DOMStore`), counted per browser
+  profile, and Internet Explorer's per `DOMStore` folder.
+- Credential Manager: the users' vault credential files
+  (`AppData\Local\Microsoft\Vault\*\*.vcrd`).
+- INF files: `Windows\INF\*.inf`.
+- NTDS: Active Directory's database, `Windows\NTDS\ntds.dit`. On a domain
+  controller, which holds it open, a lock gets "(requires NTFS parser)".
+- Windows Search index: `Windows.edb` with its ESE logs and checkpoint, and
+  `Windows.db` and `Windows-gather.db` with their `-wal` files, counted as
+  one unit whose main files are the databases.
+- Browser Sessions: `Current Session`, `Current Tabs`, `Last Session` and
+  `Last Tabs` in most Chromium-family browsers' profile folders (Chrome's in
+  XP profiles too), and Brave's sessions for every profile (was `Default`
+  only).
+- Browser Preferences: `Secure Preferences` and `Sync Data`
+  (`SyncData.sqlite3`, or the whole folder for some browsers) of most
+  Chromium-family browsers, and Firefox's `signedinuser.json`.
+- Browser Cookies: `Network\Cookies` for Edge (every channel), Chrome and
+  Arc.
+- Browser Extensions: Chrome's `Extension Activity` and Firefox's
+  `addons.sqlite` (with its journal or WAL), beside `extensions.json`.
+- Application Compatibility: `Inventory*.db` in
+  `Windows\AppCompat\Programs`.
+- Teams Logs: classic Teams' `old_logs_*.txt`.
+
+### Changed
+- A missing artefact is warned about where it is present by default on the
+  host's Windows release and type (client or server), and explained only
+  where it is absent by default there for a known OS or configuration
+  reason; anywhere else it reads *Missing*, with no note and no warning.
+- Warned about when missing, where they were not before: Browser Cookies,
+  Browser History and INF files on every host; the NTFS metafile rows,
+  which read *Missing* only when no NTFS drive is found: `$LogFile` and
+  `$MFT` on every host, `$MFTMirr` on clients and from Windows Server
+  2003, `$UsnJrnl:$J` on clients from Windows 7; Group Policy on servers
+  and on clients before Windows Vista; Recycle Bin on servers and on
+  clients up to Windows 11 23H2; Browser Bookmarks and LNK on clients from
+  Windows XP; Thumbcache and Windows Search index on clients from Windows
+  Vista; Browser Sessions and JumpLists on clients from Windows 7; Browser
+  Web Storage on clients from Windows 7 and from Windows Server 2008;
+  Defender Logs on clients from Windows Vista and from Windows Server 2016;
+  Windows Timeline on Windows 10 1803 to 22H2.
+- Newly explained: JumpLists, missing on a client before Windows 7, reads
+  *(not on this Windows version)*.
+- SRUM is also warned about on Windows Server 2019 and later.
+- Prefetch is warned about on clients from Windows 8 (was every client).
+- User Access Logging is warned about on Windows Server 2016 and later
+  (was every server).
+- SetupAPI is warned about on clients up to Windows 11 23H2 (was every
+  host): no longer on Windows 11 24H2 and later or on servers.
+- No longer explained, each now *Missing* with no note: Prefetch and
+  OneDrive Metadata on Windows Server ("normal for Windows Server"), Group
+  Policy ("not joined to on-premises AD"), SRUM on Windows 7 and Windows
+  Server 2008 R2 and Restore Point Logs ("not on this Windows version"),
+  File History Catalogs ("off by default").
+- When the host's OS version or type can't be determined, no missing
+  artefact is warned about or explained (BITS, Event Logs, both Registry
+  Hives rows, Scheduled Tasks, SetupAPI and Application Compatibility were
+  warned about, and Firewall Log and File History Catalogs explained,
+  whatever the host).
+- Browser Preferences counts a profile's `Sync Data` folder, and Browser
+  Cookies its `Network` folder, as a unit of its own: a profile with files
+  both there and in the profile folder counts twice.
+
 ## 2.3.0 - 2026-11-20
 
 ### Added
