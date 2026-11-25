@@ -34,7 +34,7 @@ it open, says exactly what it couldn't, and moves on. For a comprehensive
 collection, including locked files and raw NTFS artefacts, use a full
 collector such as KAPE or the Velociraptor Offline Collector.
 
-![Live Response console: connect, run collector.ps1 and Live Response's transcript line, then latro 2.3.0, its header fields (the UTC start time, the host, the OS, the run log's path and the drives searched), the Warnings section reading none, and the first 11 of its 47 progress lines, one per artefact](docs/images/live-response-run.webp)
+![Live Response console: connect, run collector.ps1 and Live Response's transcript line, then latro 2.4.1, its header fields (the UTC start time, the host, the OS, the run log's path and the drives searched), the Warnings section reading none, and the first 27 of its 54 progress lines, one per artefact](docs/images/live-response-run.webp)
 
 A run in a Live Response session (Windows 11 Enterprise 24H2, as SYSTEM).
 
@@ -392,9 +392,9 @@ they hold only records is not yet settled.
 
 ## Reading the summary
 
-![Live Response console: the end of the run - the last two lines of the artefact summary (WER and Windows Timeline), the number of files collected with the zip's size in MiB, the getfile command for the zip, its SHA-256 and the getfile command for the run log](docs/images/live-response-summary.webp)
+![Live Response console: near the end of the run - the last 19 lines of the artefact summary (Browser Saved Logins to Windows Timeline: counts collected, not accessible with the note requires NTFS parser, and Missing), the number of files collected with the zip's size in MiB, the getfile command for the zip, its SHA-256 and the getfile command for the run log](docs/images/live-response-summary.webp)
 
-The end of the same run.
+The same run's summary, up to the getfile line for the run log.
 
 At the end come the Warnings again, the artefact summary and the lists under
 it (folders not listed, copies whose size differs), the total
@@ -460,7 +460,7 @@ are not counted either.
 ![Notepad: the run log beside the zip - latro and its version, the header fields (the UTC start time, the host, the OS, the run log's path and the drives searched), the Warnings section and the first 48 of its 54 progress lines, one per artefact](docs/images/run-log.webp)
 
 The zip in Explorer, from a test machine run before 2.3.0, and the run log
-in Notepad, from 2.3.0 (an elevated run, so its one warning).
+in Notepad, from 2.4.0 (an elevated run, so its one warning).
 
 - The zip holds the files as they were read during the run, at that point in
   time, under their original paths. The SHA-256 printed with it identifies
